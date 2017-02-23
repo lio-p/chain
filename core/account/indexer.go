@@ -76,7 +76,6 @@ type rawOutput struct {
 	bc.AssetAmount
 	controlProgram []byte
 	txHash         bc.Hash
-	outputIndex    uint32
 }
 
 type accountOutput struct {
@@ -107,11 +106,10 @@ func (m *Manager) processBlock(ctx context.Context, b *bc.Block) error {
 func (m *Manager) indexAccountUTXOs(ctx context.Context, b *bc.Block) error {
 	// Upsert any UTXOs belonging to accounts managed by this Core.
 	outs := make([]*rawOutput, 0, len(b.Transactions))
-	for i, tx := range b.Transactions {
-		for j, resultRef := range tx.Results() {
+	for _, tx := range b.Transactions {
+		for _, resultRef := range tx.Results() {
 			raw := &rawOutput{
 				txHash:   tx.ID(),
-				position: j,
 				outputID: resultRef.Hash(),
 			}
 			switch res := resultRef.Entry.(type) {
@@ -151,9 +149,8 @@ func prevoutDBKeys(txs ...*bc.Transaction) (outputIDs pq.ByteaArray) {
 	for _, tx := range txs {
 		for _, spRef := range tx.Spends {
 			sp := spRef.Entry.(*bc.Spend)
-			spentRef := sp.SpentOutput()
-			spentID := spentRef.Hash()
-			outputIDs = append(outputIDs, spentID[:])
+			outputID := sp.OutputID()
+			outputIDs = append(outputIDs, outputID[:])
 		}
 	}
 	return

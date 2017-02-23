@@ -34,27 +34,26 @@ var (
 
 // utxo describes an individual account utxo.
 type utxo struct {
-	outputID            bc.Hash
-	prevout             *bc.Prevout
-	accountID           string
-	controlProgramIndex uint64
+	OutputID            bc.Hash
+	Prevout             *bc.Prevout
+	AccountID           string
+	ControlProgramIndex uint64
 }
 
 func newUTXO(accountID string, outputID bc.Hash, assetAmount bc.AssetAmount, controlProg bc.Program, cpIndex uint64) *utxo {
 	return &utxo{
-		outputID: outputID,
-		prevout: &bc.Prevout{
+		OutputID: outputID,
+		Prevout: &bc.Prevout{
 			AssetAmount: assetAmount,
 			Program:     controlProg,
 		},
-		accountID:           accountID,
-		controlProgramIndex: cpIndex,
+		AccountID:           accountID,
+		ControlProgramIndex: cpIndex,
 	}
 }
 
 func (u *utxo) source() source {
-	out := spentRef.Entry.(*bc.Output)
-	return source{AssetID: out.AssetID(), AccountID: u.AccountID}
+	return source{AssetID: u.Prevout.AssetID, AccountID: u.AccountID}
 }
 
 // source describes the criteria to use when selecting UTXOs.
@@ -241,8 +240,7 @@ func (re *reserver) ExpireReservations(ctx context.Context) error {
 
 func (re *reserver) checkUTXO(u *utxo) bool {
 	_, s := re.c.State()
-	outputID := u.spentRef.Hash()
-	return s.Tree.ContainsKey(outputID[:])
+	return s.Tree.ContainsKey(u.OutputID[:])
 }
 
 func (re *reserver) source(src source) *sourceReserver {
@@ -304,10 +302,9 @@ func (sr *sourceReserver) reserveFromCache(rid uint64, amount uint64) ([]*utxo, 
 	defer sr.mu.Unlock()
 
 	for o, u := range sr.cached {
-		out := u.spentRef.Entry.(*bc.Output)
 		// If the UTXO is already reserved, skip it.
-		if _, ok := sr.reserved[u.spentRef.Hash()]; ok {
-			unavailable += out.Amount()
+		if _, ok := sr.reserved[u.OutputID]; ok {
+			unavailable += u.Prevout.Amount
 			continue
 		}
 		// Cached utxos aren't guaranteed to still be valid; they may
@@ -318,7 +315,7 @@ func (sr *sourceReserver) reserveFromCache(rid uint64, amount uint64) ([]*utxo, 
 			continue
 		}
 
-		reserved += out.Amount()
+		reserved += u.Prevout.Amount
 		reservedUTXOs = append(reservedUTXOs, u)
 		if reserved >= amount {
 			break
@@ -337,7 +334,7 @@ func (sr *sourceReserver) reserveFromCache(rid uint64, amount uint64) ([]*utxo, 
 
 	// We've found enough to satisfy the request.
 	for _, u := range reservedUTXOs {
-		sr.reserved[u.spentRef.Hash()] = rid
+		sr.reserved[u.OutputID] = rid
 	}
 
 	return reservedUTXOs, reserved, nil
@@ -347,12 +344,12 @@ func (sr *sourceReserver) reserveUTXO(rid uint64, utxo *utxo) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
-	_, isReserved := sr.reserved[utxo.spentRef.Hash()]
+	_, isReserved := sr.reserved[utxo.OutputID]
 	if isReserved {
 		return ErrReserved
 	}
 
-	sr.reserved[utxo.spentRef.Hash()] = rid
+	sr.reserved[utxo.OutputID] = rid
 	return nil
 }
 
@@ -360,7 +357,7 @@ func (sr *sourceReserver) cancel(res *reservation) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	for _, utxo := range res.UTXOs {
-		delete(sr.reserved, utxo.spentRef.Hash())
+		delete(sr.reserved, utxo.OutputID)
 	}
 }
 
@@ -384,7 +381,7 @@ func (sr *sourceReserver) refillCache(ctx context.Context) error {
 		sr.lastHeight = curHeight
 	}
 	for _, u := range utxos {
-		sr.cached[u.spentRef.Hash()] = u
+		sr.cached[u.OutputID] = u
 	}
 	sr.mu.Unlock()
 
@@ -437,6 +434,6 @@ func findSpecificUTXO(ctx context.Context, db pg.DB, outputID bc.Hash) (*utxo, e
 		AssetID: assetID,
 		Amount:  amount,
 	}
-	u := newUTXO(accountID, outputID, assetAmount, bc.Program{VMVersion: 1, Code: controlProg})
+	u := newUTXO(accountID, outputID, assetAmount, bc.Program{VMVersion: 1, Code: controlProg}, cpIndex)
 	return u, nil
 }

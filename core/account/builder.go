@@ -66,11 +66,8 @@ func (a *spendAction) Build(ctx context.Context, b *txbuilder.TemplateBuilder) e
 	b.OnRollback(canceler(ctx, a.accounts, res.ID))
 
 	for _, r := range res.UTXOs {
-		txInput, sigInst, err := utxoToInputs(ctx, acct, r, a.ReferenceData)
-		if err != nil {
-			return errors.Wrap(err, "creating inputs")
-		}
-		err = b.AddInput(txInput, sigInst)
+		var refdataHash bc.Hash // xxx initialize from a.ReferenceData
+		err = b.AddPrevoutSpend(r.OutputID, r.Prevout, refdataHash, utxoToSigInst(r, acct))
 		if err != nil {
 			return errors.Wrap(err, "adding inputs")
 		}
@@ -81,11 +78,11 @@ func (a *spendAction) Build(ctx context.Context, b *txbuilder.TemplateBuilder) e
 		if err != nil {
 			return errors.Wrap(err, "creating control program")
 		}
-
 		// Don't insert the control program until callbacks are executed.
 		a.accounts.insertControlProgramDelayed(ctx, b, acp)
-
-		err = b.AddOutput(bc.NewTxOutput(a.AssetID, res.Change, acp.controlProgram, nil))
+		chgValue := bc.AssetAmount{AssetID: a.AssetID, Amount: res.Change}
+		chgProg := bc.Program{VMVersion: 1, Code: acp.controlProgram}
+		err = b.AddOutput(chgValue, chgProg, bc.Hash{})
 		if err != nil {
 			return errors.Wrap(err, "adding change output")
 		}
@@ -133,11 +130,9 @@ func (a *spendUTXOAction) Build(ctx context.Context, b *txbuilder.TemplateBuilde
 	if err != nil {
 		return err
 	}
-	txInput, sigInst, err := utxoToInputs(ctx, acct, res.UTXOs[0], a.ReferenceData)
-	if err != nil {
-		return err
-	}
-	return b.AddInput(txInput, sigInst)
+	u := res.UTXOs[0]
+	var refdataHash bc.Hash // xxx initialize from a.ReferenceData
+	return b.AddPrevoutSpend(u.OutputID, u.Prevout, refdataHash, utxoToSigInst(u, acct))
 }
 
 // Best-effort cancellation attempt to put in txbuilder.BuildResult.Rollback.
@@ -150,23 +145,14 @@ func canceler(ctx context.Context, m *Manager, rid uint64) func() {
 	}
 }
 
-func utxoToInputs(ctx context.Context, account *signers.Signer, u *utxo, refData []byte) (
-	*bc.TxInput,
-	*txbuilder.SigningInstruction,
-	error,
-) {
-	txInput := bc.NewSpendInput(u.OutputID, nil, u.AssetID, u.Amount, u.ControlProgram, refData)
-
+func utxoToSigInst(u *utxo, account *signers.Signer) *txbuilder.SigningInstruction {
 	sigInst := &txbuilder.SigningInstruction{
-		AssetAmount: u.AssetAmount,
+		AssetAmount: u.Prevout.AssetAmount,
 	}
-
 	path := signers.Path(account, signers.AccountKeySpace, u.ControlProgramIndex)
 	keyIDs := txbuilder.KeyIDs(account.XPubs, path)
-
 	sigInst.AddWitnessKeys(keyIDs, account.Quorum)
-
-	return txInput, sigInst, nil
+	return sigInst
 }
 
 func (m *Manager) NewControlAction(amt bc.AssetAmount, accountID string, refData chainjson.Map) txbuilder.Action {
@@ -210,7 +196,9 @@ func (a *controlAction) Build(ctx context.Context, b *txbuilder.TemplateBuilder)
 	}
 	a.accounts.insertControlProgramDelayed(ctx, b, acp)
 
-	return b.AddOutput(bc.NewTxOutput(a.AssetID, a.Amount, acp.controlProgram, a.ReferenceData))
+	prog := bc.Program{VMVersion: 1, Code: acp.controlProgram}
+	var refdataHash bc.Hash // xxx initialize from a.ReferenceData
+	return b.AddOutput(a.AssetAmount, prog, refdataHash)
 }
 
 // insertControlProgramDelayed takes a template builder and an account
