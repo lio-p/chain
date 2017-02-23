@@ -108,7 +108,7 @@ func ConfirmTx(snapshot *state.Snapshot, initialBlockHash bc.Hash, block *bc.Blo
 
 	for _, spRef := range tx.Spends {
 		sp := spRef.Entry.(*bc.Spend)
-		spentOutputID := sp.SpentOutput().Hash()
+		spentOutputID := sp.OutputID()
 		k, val := state.OutputTreeItem(spentOutputID)
 		if !snapshot.Tree.Contains(k, val) {
 			inputID := spRef.Hash()
@@ -177,22 +177,23 @@ func CheckTxWellFormed(tx *bc.Transaction) error {
 
 	for _, spRef := range tx.Spends {
 		sp := spRef.Entry.(*bc.Spend)
-		outRef := sp.SpentOutput()
-		out := outRef.Entry.(*bc.Output)
-		if out.Amount() > math.MaxInt64 {
+		assetAmount := sp.AssetAmount()
+		assetID := assetAmount.AssetID
+		amount := assetAmount.Amount
+		if amount > math.MaxInt64 {
 			return badTxErr(errInputTooBig)
 		}
-		sum, ok := checked.AddInt64(parity[out.AssetID()], int64(out.Amount()))
+		sum, ok := checked.AddInt64(parity[assetID], int64(amount))
 		if !ok {
 			id := spRef.Hash()
 			return badTxErrf(errInputSumTooBig, "adding input %x overflows the allowed asset amount", id[:])
 		}
-		parity[out.AssetID()] = sum
+		parity[assetID] = sum
 		if txVersion == 1 {
-			prog := out.ControlProgram()
+			prog := sp.ControlProgram()
 			if prog.VMVersion != 1 {
 				id := spRef.Hash()
-				outID := outRef.Hash()
+				outID := sp.OutputID()
 				return badTxErrf(errVMVersion, "unknown vm version %d in input %x (spending output %x) for transaction version %d", prog.VMVersion, id[:], outID[:], txVersion)
 			}
 		}
@@ -303,8 +304,7 @@ func ApplyTx(snapshot *state.Snapshot, tx *bc.Transaction) error {
 
 	for _, spRef := range tx.Spends {
 		sp := spRef.Entry.(*bc.Spend)
-		spentOutputID := sp.SpentOutput().Hash()
-		snapshot.Tree.Delete(spentOutputID.Bytes())
+		snapshot.Tree.Delete(sp.OutputID().Bytes())
 	}
 
 	for _, outRef := range tx.Outputs {

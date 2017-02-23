@@ -15,6 +15,10 @@ func (Output) Type() string            { return typeOutput }
 func (o *Output) Body() interface{}    { return &o.body }
 func (o *Output) Witness() interface{} { return nil }
 
+func (o *Output) AssetAmount() AssetAmount {
+	return o.body.Source.Value
+}
+
 func (o *Output) AssetID() AssetID {
 	return o.body.Source.Value.AssetID
 }

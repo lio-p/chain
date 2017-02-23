@@ -91,15 +91,7 @@ func verifyTxInput(tx *bc.Transaction, input *bc.EntryRef) error {
 		return f(e.IssuanceProgram(), e.Arguments())
 
 	case *bc.Spend:
-		oEntry := e.SpentOutput().Entry
-		if oEntry == nil {
-			// xxx error
-		}
-		o, ok := oEntry.(*bc.Output)
-		if !ok {
-			// xxx error
-		}
-		return f(o.ControlProgram(), e.Arguments())
+		return f(e.ControlProgram(), e.Arguments())
 	}
 
 	return errors.WithDetailf(ErrUnsupportedTx, "transaction input has unknown type %T", input.Entry)

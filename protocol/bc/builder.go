@@ -37,9 +37,11 @@ func NewBuilder(version, minTimeMS, maxTimeMS uint64, base *Transaction) *Builde
 		}
 		for _, spRef := range base.Spends {
 			sp := spRef.Entry.(*Spend)
-			spentOutputRef := sp.SpentOutput()
-			spentOutput := spentOutputRef.Entry.(*Output)
-			result.AddSpend(spentOutputRef, AssetAmount{AssetID: spentOutput.AssetID(), Amount: spentOutput.Amount()}, sp.Data())
+			if sp.body.SpentOutput.Entry != nil {
+				result.AddFullSpend(sp.body.SpentOutput, sp.Data())
+			} else {
+				result.AddPrevoutSpend(sp.body.SpentOutput.Hash(), sp.prevout, sp.Data())
+			}
 		}
 		for _, oRef := range base.Outputs {
 			o := oRef.Entry.(*Output)
@@ -107,12 +109,22 @@ func (b *Builder) AddRetirement(value AssetAmount, data Hash) {
 	})
 }
 
-func (b *Builder) AddSpend(spentOutput *EntryRef, value AssetAmount, data Hash) *EntryRef {
-	spRef := &EntryRef{Entry: NewSpend(spentOutput, data)}
+func (b *Builder) AddFullSpend(spentOutput *EntryRef, data Hash) *EntryRef {
+	sp := NewFullSpend(spentOutput, data)
+	return b.addSpend(sp)
+}
+
+func (b *Builder) AddPrevoutSpend(outputID Hash, prevout *Prevout, data Hash) *EntryRef {
+	sp := NewPrevoutSpend(outputID, prevout, data)
+	return b.addSpend(sp)
+}
+
+func (b *Builder) addSpend(sp *Spend) *EntryRef {
+	spRef := &EntryRef{Entry: sp}
 	b.spends = append(b.spends, spRef)
 	src := ValueSource{
 		Ref:   spRef,
-		Value: value,
+		Value: sp.AssetAmount(),
 	}
 	b.m.body.Sources = append(b.m.body.Sources, src)
 	return spRef

@@ -194,10 +194,7 @@ CREATE TABLE account_utxos (
     control_program_index bigint NOT NULL,
     control_program bytea NOT NULL,
     confirmed_in bigint NOT NULL,
-    output_id bytea NOT NULL,
-    source_ref bytea NOT NULL,
-    source_pos bigint NOT NULL,
-    refdata bytea
+    output_id bytea NOT NULL
 );
 
 
@@ -891,4 +888,4 @@ insert into migrations (filename, hash) values ('2017-02-03.0.core.schema-snapsh
 insert into migrations (filename, hash) values ('2017-02-07.0.query.non-null-alias.sql', '17028a0bdbc95911e299dc65fe641184e54c87a0d07b3c576d62d023b9a8defc');
 insert into migrations (filename, hash) values ('2017-02-16.0.query.spent-output.sql', '7cd52095b6f202d7a25ffe666b7b7d60e7700d314a7559b911e236b72661a738');
 insert into migrations (filename, hash) values ('2017-02-20.0.core.drop-account_utxo-index.sql', 'a6c581ad28c0d4283deb9289206eb7377793169df797947c88d78c5bd7590ad0');
-insert into migrations (filename, hash) values ('2017-02-22.0.core.drop-account_utxo-index.sql', 'a56e059d9f0b31066c0618d0aedd552be8125df50a0b58757a41e4959eb4964e');
+insert into migrations (filename, hash) values ('2017-02-22.0.core.drop-account_utxo-txhash.sql', '6f918e24c6de4a30f16eecdcbe2a30f9980aa0b0db7b2b0329a58d52fe24a972');

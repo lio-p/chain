@@ -78,9 +78,7 @@ func (ind *Indexer) insertAnnotatedTxs(ctx context.Context, b *bc.Block) ([]*Ann
 	for _, tx := range b.Transactions {
 		for _, spRef := range tx.Spends {
 			sp := spRef.Entry.(*bc.Spend)
-			spentOutputRef := sp.SpentOutput()
-			spentOutputID := spentOutputRef.Hash()
-			outputIDs = append(outputIDs, spentOutputID.Bytes())
+			outputIDs = append(outputIDs, sp.OutputID().Bytes())
 		}
 	}
 
@@ -228,9 +226,7 @@ func (ind *Indexer) insertAnnotatedOutputs(ctx context.Context, b *bc.Block, ann
 
 		for _, spRef := range tx.Spends {
 			sp := spRef.Entry.(*bc.Spend)
-			spentOutputRef := sp.SpentOutput()
-			spentOutputID := spentOutputRef.Hash()
-			prevoutIDs = append(prevoutIDs, spentOutputID.Bytes())
+			prevoutIDs = append(prevoutIDs, sp.OutputID().Bytes())
 		}
 
 		for outIndex, out := range annotatedTxs[pos].Outputs {

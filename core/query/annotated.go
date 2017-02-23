@@ -164,17 +164,16 @@ func buildAnnotatedTransaction(orig *bc.Transaction, b *bc.Block, indexInBlock u
 
 func buildAnnotatedSpend(orig *bc.EntryRef) *AnnotatedInput {
 	sp := orig.Entry.(*bc.Spend)
-	spentRef := sp.SpentOutput()
-	spentOutput := spentRef.Entry.(*bc.Output)
-	prevoutID := spentRef.Hash()
+	prevoutID := sp.OutputID()
+	assetAmount := sp.AssetAmount()
 	in := &AnnotatedInput{
 		Type:            "spend",
-		AssetID:         spentOutput.AssetID(),
-		Amount:          spentOutput.Amount(),
+		AssetID:         assetAmount.AssetID,
+		Amount:          assetAmount.Amount,
 		AssetDefinition: &emptyJSONObject,
 		AssetTags:       &emptyJSONObject,
 		ReferenceData:   &emptyJSONObject,
-		ControlProgram:  spentOutput.ControlProgram().Code, // xxx should annotated input preserve the vmversion field?
+		ControlProgram:  sp.ControlProgram().Code, // xxx should annotated input preserve the vmversion field?
 		SpentOutputID:   &prevoutID,
 	}
 

@@ -34,28 +34,21 @@ var (
 
 // utxo describes an individual account utxo.
 type utxo struct {
-	spentRef *bc.EntryRef // contains a *bc.Output
-
-	AccountID           string
-	ControlProgramIndex uint64
+	outputID            bc.Hash
+	prevout             *bc.Prevout
+	accountID           string
+	controlProgramIndex uint64
 }
 
-func newUTXO(accountID string, outputID bc.Hash, assetAmount bc.AssetAmount, controlProg bc.Program, cpIndex uint64, sourceRef bc.Hash, sourcePos uint64, refdata bc.Hash) *utxo {
-	v := bc.ValueSource{
-		Ref: &bc.EntryRef{
-			ID: &sourceRef,
-		},
-		Value:    assetAmount,
-		Position: sourcePos,
-	}
-	out := bc.NewOutput(v, controlProg, refdata)
+func newUTXO(accountID string, outputID bc.Hash, assetAmount bc.AssetAmount, controlProg bc.Program, cpIndex uint64) *utxo {
 	return &utxo{
-		spentRef: &bc.EntryRef{
-			Entry: out,
-			ID:    &outputID, // assert: entryID(out) == outputID
+		outputID: outputID,
+		prevout: &bc.Prevout{
+			AssetAmount: assetAmount,
+			Program:     controlProg,
 		},
-		AccountID:           accountID,
-		ControlProgramIndex: cpIndex,
+		accountID:           accountID,
+		controlProgramIndex: cpIndex,
 	}
 }
 
@@ -400,18 +393,18 @@ func (sr *sourceReserver) refillCache(ctx context.Context) error {
 
 func findMatchingUTXOs(ctx context.Context, db pg.DB, src source, height uint64) ([]*utxo, error) {
 	const q = `
-		SELECT output_id, amount, control_program_index, control_program, source_ref, source_pos, refdata
+		SELECT output_id, amount, control_program_index, control_program
 		FROM account_utxos
 		WHERE account_id = $1 AND asset_id = $2 AND confirmed_in > $3
 	`
 	var utxos []*utxo
 	err := pg.ForQueryRows(ctx, db, q, src.AccountID, src.AssetID, height,
-		func(oid bc.Hash, amount uint64, cpIndex uint64, controlProg []byte, sourceRef bc.Hash, sourcePos uint64, refData bc.Hash) {
+		func(oid bc.Hash, amount uint64, cpIndex uint64, controlProg []byte) {
 			assetAmount := bc.AssetAmount{
 				AssetID: src.AssetID,
 				Amount:  amount,
 			}
-			u := newUTXO(src.AccountID, oid, assetAmount, bc.Program{VMVersion: 1, Code: controlProg}, cpIndex, sourceRef, sourcePos, refData)
+			u := newUTXO(src.AccountID, oid, assetAmount, bc.Program{VMVersion: 1, Code: controlProg}, cpIndex)
 			utxos = append(utxos, u)
 		})
 	if err != nil {
@@ -422,7 +415,7 @@ func findMatchingUTXOs(ctx context.Context, db pg.DB, src source, height uint64)
 
 func findSpecificUTXO(ctx context.Context, db pg.DB, outputID bc.Hash) (*utxo, error) {
 	const q = `
-		SELECT account_id, asset_id, amount, control_program_index, control_program, source_ref, source_pos, refdata
+		SELECT account_id, asset_id, amount, control_program_index, control_program
 		FROM account_utxos
 		WHERE output_id = $1
 	`
@@ -432,11 +425,8 @@ func findSpecificUTXO(ctx context.Context, db pg.DB, outputID bc.Hash) (*utxo, e
 		amount      uint64
 		cpIndex     uint64
 		controlProg []byte
-		sourceRef   bc.Hash
-		sourcePos   uint64
-		refData     bc.Hash
 	)
-	err := db.QueryRow(ctx, q, outputID).Scan(&accountID, &assetID, &amount, &cpIndex, &controlProg, &sourceRef, &sourcePos, &refData)
+	err := db.QueryRow(ctx, q, outputID).Scan(&accountID, &assetID, &amount, &cpIndex, &controlProg)
 	if err == sql.ErrNoRows {
 		return nil, pg.ErrUserInputNotFound
 	}
@@ -447,6 +437,6 @@ func findSpecificUTXO(ctx context.Context, db pg.DB, outputID bc.Hash) (*utxo, e
 		AssetID: assetID,
 		Amount:  amount,
 	}
-	u := newUTXO(accountID, outputID, assetAmount, bc.Program{VMVersion: 1, Code: controlProg}, sourceRef, sourcePos, refData)
+	u := newUTXO(accountID, outputID, assetAmount, bc.Program{VMVersion: 1, Code: controlProg})
 	return u, nil
 }

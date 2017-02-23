@@ -101,15 +101,7 @@ func opAsset(vm *virtualMachine) error {
 
 	switch e := vm.input.Entry.(type) {
 	case *bc.Spend:
-		oEntry := e.SpentOutput().Entry
-		if oEntry == nil {
-			// xxx error
-		}
-		o, ok := oEntry.(*bc.Output)
-		if !ok {
-			// xxx error
-		}
-		assetID = o.AssetID()
+		assetID = e.AssetAmount().AssetID
 
 	case *bc.Issuance:
 		assetID = e.AssetID()
@@ -135,15 +127,7 @@ func opAmount(vm *virtualMachine) error {
 
 	switch e := vm.input.Entry.(type) {
 	case *bc.Spend:
-		oEntry := e.SpentOutput().Entry
-		if oEntry == nil {
-			// xxx error
-		}
-		o, ok := oEntry.(*bc.Output)
-		if !ok {
-			// xxx error
-		}
-		amount = o.Amount()
+		amount = e.AssetAmount().Amount
 
 	case *bc.Issuance:
 		amount = e.Amount()
@@ -249,8 +233,7 @@ func opOutputID(vm *virtualMachine) error {
 	if sp == nil {
 		// xxx error
 	}
-	spent := sp.SpentOutput()
-	outID := spent.Hash()
+	outID := sp.OutputID()
 
 	err := vm.applyCost(1)
 	if err != nil {

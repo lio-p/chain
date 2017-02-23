@@ -179,7 +179,7 @@ func buildSigProgram(tpl *Template, inpRef *bc.EntryRef) []byte {
 		maxTimeMS: tpl.Transaction.MaxTimeMS(),
 	})
 	if sp, ok := inpRef.Entry.(*bc.Spend); ok {
-		constraints = append(constraints, outputIDConstraint(sp.SpentOutput().Hash()))
+		constraints = append(constraints, outputIDConstraint(sp.OutputID()))
 	}
 
 	// Commitment to refdata is conditional on it being non-zero.

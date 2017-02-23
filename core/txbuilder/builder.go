@@ -27,16 +27,22 @@ type TemplateBuilder struct {
 	isLocal             bool
 }
 
-func (b *TemplateBuilder) AddSpend(spentOutput *bc.EntryRef, value bc.AssetAmount, data bc.Hash, sigInstruction *SigningInstruction) error {
+func (b *TemplateBuilder) AddFullSpend(spentRef *bc.EntryRef, data bc.Hash, sigInstruction *SigningInstruction) error {
+	spent := spentRef.Entry.(*bc.Output)
+	value := spent.AssetAmount()
 	if value.Amount > math.MaxInt64 {
 		return errors.WithDetailf(ErrBadAmount, "amount %d exceeds maximum value 2^63", value.Amount)
 	}
-	if prevout, ok := spentOutput.Entry.(*bc.Output); ok {
-		if value.AssetID != prevout.AssetID() || value.Amount != prevout.Amount() {
-			return errors.WithDetailf(ErrBadAmount, "amount %d of asset %x does not match the output being spent", value.Amount, value.AssetID[:])
-		}
+	spRef := b.bcBuilder.AddFullSpend(spentRef, data)
+	b.signingInstructions[spRef.Hash()] = sigInstruction
+	return nil
+}
+
+func (b *TemplateBuilder) AddPrevoutSpend(outputID bc.Hash, prevout *bc.Prevout, data bc.Hash, sigInstruction *SigningInstruction) error {
+	if prevout.Amount > math.MaxInt64 {
+		return errors.WithDetailf(ErrBadAmount, "amount %d exceeds maximum value 2^63", prevout.Amount)
 	}
-	spRef := b.bcBuilder.AddSpend(spentOutput, value, data)
+	spRef := b.bcBuilder.AddPrevoutSpend(outputID, prevout, data)
 	b.signingInstructions[spRef.Hash()] = sigInstruction
 	return nil
 }

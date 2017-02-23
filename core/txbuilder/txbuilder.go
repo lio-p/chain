@@ -118,10 +118,9 @@ func checkBlankCheck(tx *bc.Transaction) error {
 	}
 	for _, spRef := range tx.Spends {
 		sp := spRef.Entry.(*bc.Spend)
-		spentOutputRef := sp.SpentOutput()
-		spentOutput := spentOutputRef.Entry.(*bc.Output)
-		assetID := spentOutput.AssetID()
-		assetMap[assetID], ok = checked.AddInt64(assetMap[assetID], int64(spentOutput.Amount()))
+		assetAmount := sp.AssetAmount()
+		assetID := assetAmount.AssetID
+		assetMap[assetID], ok = checked.AddInt64(assetMap[assetID], int64(assetAmount.Amount))
 		if !ok {
 			return errors.WithDetailf(ErrBadAmount, "cumulative amounts for asset %s overflow the allowed asset amount 2^63", assetID)
 		}
