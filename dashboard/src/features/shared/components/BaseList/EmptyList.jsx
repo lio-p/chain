@@ -7,18 +7,16 @@ class EmptyList extends React.Component {
     let emptyImage
 
     try {
-      emptyImage = require(`assets/images/empty/${this.props.type}.svg`)
+      emptyImage = require(`images/empty/${this.props.type}.svg`)
     } catch (err) { /* do nothing */ }
 
     let emptyBlock
     if (!this.props.loadedOnce) {
       emptyBlock = <span>LOADING…</span>
-    } else if (this.props.showFirstTimeFlow && this.props.skipCreate) {
-      emptyBlock = this.props.firstTimeContent
     } else if (this.props.showFirstTimeFlow) {
       emptyBlock = <div>
         <span className={`${styles.emptyLabel} ${styles.noResultsLabel}`}>
-          There are no {this.props.objectName}s on the blockchain
+          There are no {this.props.objectName}s
         </span>
         {this.props.firstTimeContent}
       </div>

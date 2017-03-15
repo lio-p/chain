@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"chain/core/accesstoken"
@@ -18,15 +19,18 @@ import (
 	"chain/database/sql"
 	chainjson "chain/encoding/json"
 	"chain/env"
+	"chain/generated/rev"
 	"chain/log"
-	_ "chain/protocol/tx" // for BlockHeaderHashFunc
 )
-
-const version = "1.1rc5"
 
 // config vars
 var (
 	dbURL = env.String("DATABASE_URL", "postgres:///core?sslmode=disable")
+
+	// build vars; initialized by the linker
+	buildTag    = "?"
+	buildCommit = "?"
+	buildDate   = "?"
 )
 
 // We collect log output in this buffer,
@@ -42,6 +46,7 @@ var commands = map[string]*command{
 	"create-block-keypair": {createBlockKeyPair},
 	"create-token":         {createToken},
 	"config":               {configNongenerator},
+	"migrate":              {runMigrations},
 	"reset":                {reset},
 }
 
@@ -50,7 +55,18 @@ func main() {
 	env.Parse()
 
 	if len(os.Args) >= 2 && os.Args[1] == "-version" {
+		var version string
+		if buildTag != "?" {
+			// build tag with chain-core-server- prefix indicates official release
+			version = strings.TrimPrefix(buildTag, "chain-core-server-")
+		} else {
+			// version of the form rev123 indicates non-release build
+			version = rev.ID
+		}
 		fmt.Printf("corectl (Chain Core) %s\n", version)
+		versionProdPrintln()
+		fmt.Printf("build-commit: %v\n", buildCommit)
+		fmt.Printf("build-date: %v\n", buildDate)
 		return
 	}
 
@@ -70,11 +86,33 @@ func main() {
 		help(os.Stderr)
 		os.Exit(1)
 	}
-	err = migrate.Run(db)
-	if err != nil {
-		fatalln("error: init schema", err)
-	}
 	cmd.f(db, os.Args[2:])
+}
+
+func runMigrations(db *sql.DB, args []string) {
+	const usage = "usage: corectl migrate [-status]"
+
+	var flags flag.FlagSet
+	flagStatus := flags.Bool("status", false, "print all migrations and their status")
+	flags.Usage = func() {
+		fmt.Println(usage)
+		flags.PrintDefaults()
+		os.Exit(1)
+	}
+	flags.Parse(args)
+	if len(flags.Args()) != 0 {
+		fatalln("error: migrate takes no args")
+	}
+
+	var err error
+	if *flagStatus {
+		err = migrate.PrintStatus(db)
+	} else {
+		err = migrate.Run(db)
+	}
+	if err != nil {
+		fatalln("error: ", err)
+	}
 }
 
 func configGenerator(db *sql.DB, args []string) {
@@ -151,6 +189,7 @@ func configGenerator(db *sql.DB, args []string) {
 	}
 
 	ctx := context.Background()
+	migrateIfMissingSchema(ctx, db)
 	err = config.Configure(ctx, db, conf)
 	if err != nil {
 		fatalln("error:", err)
@@ -174,9 +213,11 @@ func createToken(db *sql.DB, args []string) {
 		fatalln(usage)
 	}
 
+	ctx := context.Background()
+	migrateIfMissingSchema(ctx, db)
 	accessTokens := &accesstoken.CredentialStore{DB: db}
 	typ := map[bool]string{true: "network", false: "client"}[*flagNet]
-	tok, err := accessTokens.Create(context.Background(), args[0], typ)
+	tok, err := accessTokens.Create(ctx, args[0], typ)
 	if err != nil {
 		fatalln("error:", err)
 	}
@@ -225,9 +266,29 @@ func configNongenerator(db *sql.DB, args []string) {
 	conf.BlockHSMAccessToken = *flagHSMToken
 
 	ctx := context.Background()
+	migrateIfMissingSchema(ctx, db)
 	err = config.Configure(ctx, db, &conf)
 	if err != nil {
 		fatalln("error:", err)
+	}
+}
+
+// migrateIfMissingSchema will migrate the provided database only
+// if the database is blank without any migrations.
+func migrateIfMissingSchema(ctx context.Context, db *sql.DB) {
+	const q = `SELECT to_regclass('migrations') IS NOT NULL`
+	var initialized bool
+	err := db.QueryRow(ctx, q).Scan(&initialized)
+	if err != nil {
+		fatalln("initializing schema", err)
+	}
+	if initialized {
+		return
+	}
+
+	err = migrate.Run(db)
+	if err != nil {
+		fatalln("initializing schema", err)
 	}
 }
 

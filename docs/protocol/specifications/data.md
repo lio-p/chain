@@ -78,12 +78,12 @@ A varstring31 whose content is the concatenation of other encoded data structure
 ### Public Key
 
 In this document, a *public key* is the 32-byte binary encoding
-of an Ed25519 (EdDSA) public key, as defined in [CFRG1](https://tools.ietf.org/html/draft-irtf-cfrg-eddsa-05).
+of an Ed25519 (EdDSA) public key, as defined in [RFC 8032].
 
 ### Signature
 
 In this document, a *signature* is the 64-byte binary encoding
-of an Ed25519 (EdDSA) signature, as defined in [CFRG1](https://tools.ietf.org/html/draft-irtf-cfrg-eddsa-05).
+of an Ed25519 (EdDSA) signature, as defined in [RFC 8032].
 
 
 ### SHA3
@@ -91,7 +91,7 @@ of an Ed25519 (EdDSA) signature, as defined in [CFRG1](https://tools.ietf.org/ht
 *SHA3* refers to the SHA3-256 function as defined in [FIPS202](https://dx.doi.org/10.6028/NIST.FIPS.202) with a fixed-length 32-byte output.
 
 This hash function is used throughout all data structures and algorithms in this spec,
-with the exception of SHA-512 (see [FIPS180](http://csrc.nist.gov/publications/fips/fips180-2/fips180-2withchangenotice.pdf)) used internally as function H inside Ed25519 (see [CFRG1](https://tools.ietf.org/html/draft-irtf-cfrg-eddsa-05)).
+with the exception of SHA-512 (see [FIPS180](http://csrc.nist.gov/publications/fips/fips180-2/fips180-2withchangenotice.pdf)) used internally as function H inside Ed25519 (see [RFC 8032]).
 
 ### Optional Hash
 
@@ -477,7 +477,7 @@ A top hash of a *merkle tree* (binary or patricia). Merkle roots are used within
 
 The protocol uses a binary merkle hash tree for efficient proofs of validity. The construction is from [RFC 6962 Section 2.1](https://tools.ietf.org/html/rfc6962#section-2.1), but using SHA3–256 instead of SHA2–256. It is reproduced here, edited to update the hashing algorithm.
 
-The input to the *merkle binary tree hash* (MBTH) is a list of data entries; these entries will be hashed to form the leaves of the merkle hash tree. The output is a single 32-byte hash value. The input list must be prefix-free; that is, no element may be a prefix of any other. Given an ordered list of n inputs, `D[n] = {d(0), d(1), ..., d(n-1)}`, the MBTH is thus defined as follows:
+The input to the *merkle binary tree hash* (MBTH) is a list of data entries; these entries will be hashed to form the leaves of the merkle hash tree. The output is a single 32-byte hash value. Given an ordered list of n inputs, `D[n] = {d(0), d(1), ..., d(n-1)}`, the MBTH is thus defined as follows:
 
 The hash of an empty list is the hash of an empty string:
 
@@ -502,7 +502,7 @@ Note that we do not require the length of the input list to be a power of two. T
 
 The protocol uses a binary radix tree with variable-length branches to implement a *merkle patricia tree*. This tree structure is used for efficient concurrent updates of the [assets merkle root](#assets-merkle-root) and compact recency proofs for unspent outputs.
 
-The input to the *merkle patricia tree hash* (MPTH) is a list of data entries; these entries will be hashed to form the leaves of the merkle hash tree. The output is a single 32-byte hash value. Given a sorted list of n unique inputs, `D[n] = {d(0), d(1), ..., d(n-1)}`, the MPTH is thus defined as follows:
+The input to the *merkle patricia tree hash* (MPTH) is a list of data entries; these entries will be hashed to form the leaves of the merkle hash tree. The output is a single 32-byte hash value. The input list must be prefix-free; that is, no element can be a prefix of any other. Given a sorted list of n unique inputs, `D[n] = {d(0), d(1), ..., d(n-1)}`, the MPTH is thus defined as follows:
 
 The hash of an empty list is a 32-byte all-zero string:
 
@@ -527,8 +527,8 @@ Note that the resulting merkle patricia tree may not be balanced; however, its s
 * [FIPS180] [“Secure Hash Standard”, United States of America, National Institute of Standards and Technology, Federal Information Processing Standard (FIPS) 180-2](http://csrc.nist.gov/publications/fips/fips180-2/fips180-2withchangenotice.pdf).
 * [FIPS202] [Federal Inf. Process. Stds. (NIST FIPS) - 202 (SHA3)](https://dx.doi.org/10.6028/NIST.FIPS.202)
 * [LEB128] [Little-Endian Base-128 Encoding](https://developers.google.com/protocol-buffers/docs/encoding)
-* [CFRG1] [Edwards-curve Digital Signature Algorithm (EdDSA) draft-irtf-cfrg-eddsa-05](https://tools.ietf.org/html/draft-irtf-cfrg-eddsa-05)
-* [RFC 6962](https://tools.ietf.org/html/rfc6962#section-2.1)
+* [RFC 6962]
+* [RFC 8032]
 
-
-
+[RFC 6962]: https://tools.ietf.org/html/rfc6962#section-2.1
+[RFC 8032]: https://tools.ietf.org/html/rfc8032

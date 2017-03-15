@@ -14,6 +14,157 @@ function checkForError(resp) {
 }
 
 /**
+ * A blockchain consists of an immutable set of cryptographically linked
+ * transactions. Each transaction contains one or more actions.
+ * <br/><br/>
+ * More info: {@link https://chain.com/docs/core/build-applications/transaction-basics}
+ * @typedef {Object} Transaction
+ * @global
+ *
+ * @property {String} id
+ * Unique transaction identifier.
+ *
+ * @property {String} timestamp
+ * Time of transaction, RFC3339 formatted.
+ *
+ * @property {String} blockId
+ * Unique identifier, or block hash, of the block containing a transaction.
+ *
+ * @property {Number} blockHeight
+ * Height of the block containing a transaction.
+ *
+ * @property {Number} position
+ * Position of a transaction within the block.
+ *
+ * @property {Object} referenceData
+ * User specified, unstructured data embedded within a transaction.
+ *
+ * @property {Boolean} isLocal
+ * A flag indicating one or more inputs or outputs are local.
+ *
+ * @property {TransactionInput[]} inputs
+ * List of specified inputs for a transaction.
+ *
+ * @property {TransactionOutput[]} outputs
+ * List of specified outputs for a transaction.
+ */
+
+/**
+ * @typedef {Object} TransactionInput
+ * @global
+ *
+ * @property {String} type
+ * The type of the input. Possible values are "issue", "spend".
+ *
+ * @property {String} assetId
+ * The id of the asset being issued or spent.
+ *
+ * @property {String} assetAlias
+ * The alias of the asset being issued or spent (possibly null).
+ *
+ * @property {Hash} assetDefinition
+ * The definition of the asset being issued or spent (possibly null).
+ *
+ * @property {Hash} assetTags
+ * The tags of the asset being issued or spent (possibly null).
+ *
+ * @property {Boolean} assetIsLocal
+ * A flag indicating whether the asset being issued or spent is local.
+ *
+ * @property {Integer} amount
+ * The number of units of the asset being issued or spent.
+ *
+ * @property {String} spentOutputId
+ * The id of the output consumed by this input. ID is nil if this is an issuance input.
+ *
+ * @property {String} accountId
+ * The id of the account transferring the asset (possibly null if the
+ * input is an issuance or an unspent output is specified).
+ *
+ * @property {String} accountAlias
+ * The alias of the account transferring the asset (possibly null if the
+ * input is an issuance or an unspent output is specified).
+ *
+ * @property {String} accountTags
+ * The tags associated with the account (possibly null).
+ *
+ * @property {String} issuanceProgram
+ * A program specifying a predicate for issuing an asset (possibly null
+ * if input is not an issuance).
+ *
+ * @property {Object} referenceData
+ * User specified, unstructured data embedded within an input (possibly null).
+ *
+ * @property {Boolean} isLocal
+ * A flag indicating if the input is local.
+ *
+ * @property {String} [inputWitness]
+ * DEPRECATED (as of version 1.1) Do not use this field.
+ *
+ * @property {String} [controlProgram]
+ * DEPRECATED (as of version 1.1) Do not use this field.
+ */
+
+/**
+ * Each new transaction in the blockchain consumes some unspent outputs and
+ * creates others. An output is considered unspent when it has not yet been used
+ * as an input to a new transaction. All asset units on a blockchain exist in
+ * the unspent output set.
+ * <br/><br/>
+ * More info: {@link https://chain.com/docs/core/build-applications/unspent-outputs}
+ * @typedef {Object} TransactionOutput
+ * @global
+ *
+ * @property {String} id
+ * The id of the output.
+ *
+ * @property {String} type
+ * The type of the output. Possible values are "control" and "retire".
+ *
+ * @property {String} purpose
+ * The purpose of the output. Possible values are "receive" and "change".
+ *
+ * @property {Number} position
+ * The output's position in a transaction's list of outputs.
+ *
+ * @property {String} assetId
+ * The id of the asset being issued or spent.
+ *
+ * @property {String} assetAlias
+ * The alias of the asset being issued or spent (possibly null).
+ *
+ * @property {Hash} assetDefinition
+ * The definition of the asset being issued or spent (possibly null).
+ *
+ * @property {Hash} assetTags
+ * The tags of the asset being issued or spent (possibly null).
+ *
+ * @property {Boolean} assetIsLocal
+ * A flag indicating whether the asset being issued or spent is local.
+ *
+ * @property {Integer} amount
+ * The number of units of the asset being issued or spent.
+ *
+ * @property {String} accountId
+ * The id of the account transferring the asset (possibly null).
+ *
+ * @property {String} accountAlias
+ * The alias of the account transferring the asset (possibly null).
+ *
+ * @property {String} accountTags
+ * The tags associated with the account (possibly null).
+ *
+ * @property {String} controlProgram
+ * The control program which must be satisfied to transfer this output.
+ *
+ * @property {Object} referenceData
+ * User specified, unstructured data embedded within an input (possibly null).
+ *
+ * @property {Boolean} isLocal
+ * A flag indicating if the input is local.
+ */
+
+/**
  * @class
  * A convenience class for building transaction template objects.
  */
@@ -42,9 +193,9 @@ class TransactionBuilder {
    * Add an action that issues assets.
    *
    * @param {Object} params - Action parameters.
-   * @param {String} params.asset_id - Asset ID specifying the asset to be issued.
+   * @param {String} params.assetId - Asset ID specifying the asset to be issued.
    *                                   You must specify either an ID or an alias.
-   * @param {String} params.asset_alias - Asset alias specifying the asset to be issued.
+   * @param {String} params.assetAlias - Asset alias specifying the asset to be issued.
    *                                      You must specify either an ID or an alias.
    * @param {String} params.amount - Amount of the asset to be issued.
    */
@@ -124,10 +275,6 @@ class TransactionBuilder {
    *
    * @param {Object} params - Action parameters.
    * @param {String} params.outputId - ID of the transaction output to be spent.
-   * @param {String} params.transactionId - DEPRECATED in version 1.1. Transaction ID specifying the
-   *                                        transaction to select an output from.
-   * @param {Number} params.position - DEPRECATED in version 1.1. Position of the output within the
-   *                                   transaction to be spent.
    */
   spendUnspentOutput(params) {
     this.actions.push(Object.assign({}, params, {type: 'spend_account_unspent_output'}))
@@ -163,29 +310,34 @@ class TransactionBuilder {
 }
 
 /**
- * Processing callback for building a transaction. The instance of
- * {@link TransactionBuilder} modified in the function is used to build a transaction
- * in Chain Core.
- *
- * @callback Transactions~builderCallback
- * @param {TransactionBuilder} builder
- */
-
-/**
- * A blockchain consists of an immutable set of cryptographically linked
- * transactions. Each transaction contains one or more actions.
+ * API for interacting with {@link Transaction transactions}.
  * <br/><br/>
  * More info: {@link https://chain.com/docs/core/build-applications/transaction-basics}
  * @module TransactionsApi
  */
 const transactionsAPI = (client) => {
+  /**
+   * Processing callback for building a transaction. The instance of
+   * {@link TransactionBuilder} modified in the function is used to build a transaction
+   * in Chain Core.
+   *
+   * @callback builderCallback
+   * @param {TransactionBuilder} builder
+   */
+
   return {
     /**
      * Get one page of transactions matching the specified query.
      *
-     * @param {Query} params={} - Filter and pagination information.
+     * @param {Object} params={} - Filter and pagination information.
+     * @param {String} params.filter - Filter string, see {@link https://chain.com/docs/core/build-applications/queries}.
+     * @param {Array<String|Number>} params.filterParams - Parameter values for filter string (if needed).
+     * @param {Number} params.startTime -  A Unix timestamp in milliseconds. When specified, only transactions with a block time greater than the start time will be returned.
+     * @param {Number} params.endTime - A Unix timestamp in milliseconds. When specified, only transactions with a block time less than the start time will be returned.
+     * @param {Number} params.timeout - A time in milliseconds after which a server timeout should occur. Defaults to 1000 (1 second).
+     * @param {Number} params.pageSize - Number of items to return in result set.
      * @param {pageCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
-     * @returns {Promise<Page>} Requested page of results.
+     * @returns {Promise<Page<Transaction>>} Requested page of results.
      */
     query: (params, cb) => shared.query(client, 'transactions', '/list-transactions', params, {cb}),
 
@@ -193,8 +345,14 @@ const transactionsAPI = (client) => {
      * Request all transactions matching the specified query, calling the
      * supplied processor callback with each item individually.
      *
-     * @param {Query} params - Filter and pagination information.
-     * @param {QueryProcessor} processor - Processing callback.
+     * @param {Object} params={} - Filter and pagination information.
+     * @param {String} params.filter - Filter string, see {@link https://chain.com/docs/core/build-applications/queries}.
+     * @param {Array<String|Number>} params.filterParams - Parameter values for filter string (if needed).
+     * @param {Number} params.startTime -  A Unix timestamp in milliseconds. When specified, only transactions with a block time greater than the start time will be returned.
+     * @param {Number} params.endTime - A Unix timestamp in milliseconds. When specified, only transactions with a block time less than the start time will be returned.
+     * @param {Number} params.timeout - A time in milliseconds after which a server timeout should occur. Defaults to 1000 (1 second).
+     * @param {Number} params.pageSize - Number of items to return in result set.
+     * @param {QueryProcessor<Transaction>} processor - Processing callback.
      * @param {objectCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
      * @returns {Promise} A promise resolved upon processing of all items, or
      *                   rejected on error.
@@ -204,10 +362,10 @@ const transactionsAPI = (client) => {
     /**
      * Build an unsigned transaction from a set of actions.
      *
-     * @param {builderCallback} builderBlock - Function that adds desired actions
+     * @param {module:TransactionsApi~builderCallback} builderBlock - Function that adds desired actions
      *                                         to a given builder object.
      * @param {objectCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
-     * @returns {Promise<Object>} - Unsigned transaction template, or error.
+     * @returns {Promise<Object>} Unsigned transaction template, or error.
      */
     build: (builderBlock, cb) => {
       const builder = new TransactionBuilder()
@@ -222,11 +380,11 @@ const transactionsAPI = (client) => {
     /**
      * Build multiple unsigned transactions from multiple sets of actions.
      *
-     * @param {Array<builderCallback>} builderBlocks - Functions that add desired actions
+     * @param {Array<module:TransactionsApi~builderCallback>} builderBlocks - Functions that add desired actions
      *                                                 to a given builder object, one
      *                                                 per transaction.
      * @param {objectCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
-     * @returns {Promise<BatchResponse>} - Batch of unsigned transaction templates, or errors.
+     * @returns {Promise<BatchResponse>} Batch of unsigned transaction templates, or errors.
      */
     buildBatch: (builderBlocks, cb) => {
       const builders = builderBlocks.map((builderBlock) => {
@@ -253,7 +411,7 @@ const transactionsAPI = (client) => {
      * Submit multiple signed transactions to the blockchain.
      *
      * @param {Array<Object>} signed - An array of fully signed transaction templates.
-     * @returns {Promise<BatchResponse>} - Batch response of transaction IDs, or errors.
+     * @returns {Promise<BatchResponse>} Batch response of transaction IDs, or errors.
      */
     submitBatch: (signed, cb) => shared.tryCallback(
       client.request('/submit-transaction', {transactions: signed})

@@ -14,9 +14,17 @@ import (
 	"chain/protocol/bc"
 )
 
-// PinName is used to identify the pin associated with
-// the account block processor.
-const PinName = "account"
+const (
+	// PinName is used to identify the pin associated with
+	// the account indexer block processor.
+	PinName = "account"
+	// ExpirePinName is used to identify the pin associated
+	// with the account control program expiration processor.
+	ExpirePinName = "expire-control-programs"
+	// DeleteSpentsPinName is used to identify the pin associated
+	// with the processor that deletes spent account UTXOs.
+	DeleteSpentsPinName = "delete-account-spents"
+)
 
 var emptyJSONObject = json.RawMessage(`{}`)
 
@@ -72,36 +80,56 @@ func (m *Manager) indexAnnotatedAccount(ctx context.Context, a *Account) error {
 }
 
 type rawOutput struct {
-	bc.OutputID
+	OutputID bc.Hash
 	bc.AssetAmount
 	ControlProgram []byte
 	txHash         bc.Hash
 	outputIndex    uint32
+	sourceID       bc.Hash
+	sourcePos      uint64
+	refData        bc.Hash
 }
 
 type accountOutput struct {
 	rawOutput
 	AccountID string
 	keyIndex  uint64
+	change    bool
 }
 
 func (m *Manager) ProcessBlocks(ctx context.Context) {
 	if m.pinStore == nil {
 		return
 	}
-	m.pinStore.ProcessBlocks(ctx, m.chain, PinName, m.processBlock)
+	go m.pinStore.ProcessBlocks(ctx, m.chain, ExpirePinName, func(ctx context.Context, b *bc.Block) error {
+		<-m.pinStore.PinWaiter(PinName, b.Height)
+		<-m.pinStore.PinWaiter(query.TxPinName, b.Height)
+		return m.expireControlPrograms(ctx, b)
+	})
+	go m.pinStore.ProcessBlocks(ctx, m.chain, DeleteSpentsPinName, func(ctx context.Context, b *bc.Block) error {
+		<-m.pinStore.PinWaiter(PinName, b.Height)
+		<-m.pinStore.PinWaiter(query.TxPinName, b.Height)
+		return m.deleteSpentOutputs(ctx, b)
+	})
+	m.pinStore.ProcessBlocks(ctx, m.chain, PinName, m.indexAccountUTXOs)
 }
 
-func (m *Manager) processBlock(ctx context.Context, b *bc.Block) error {
-	err := m.indexAccountUTXOs(ctx, b)
-	if err != nil {
-		return err
-	}
-
+func (m *Manager) expireControlPrograms(ctx context.Context, b *bc.Block) error {
 	// Delete expired account control programs.
 	const deleteQ = `DELETE FROM account_control_programs WHERE expires_at IS NOT NULL AND expires_at < $1`
-	_, err = m.db.Exec(ctx, deleteQ, b.Time())
+	_, err := m.db.Exec(ctx, deleteQ, b.Time())
 	return err
+}
+
+func (m *Manager) deleteSpentOutputs(ctx context.Context, b *bc.Block) error {
+	// Delete consumed account UTXOs.
+	delOutputIDs := prevoutDBKeys(b.Transactions...)
+	const delQ = `
+		DELETE FROM account_utxos
+		WHERE output_id IN (SELECT unnest($1::bytea[]))
+	`
+	_, err := m.db.Exec(ctx, delQ, delOutputIDs)
+	return errors.Wrap(err, "deleting spent account utxos")
 }
 
 func (m *Manager) indexAccountUTXOs(ctx context.Context, b *bc.Block) error {
@@ -117,6 +145,9 @@ func (m *Manager) indexAccountUTXOs(ctx context.Context, b *bc.Block) error {
 				ControlProgram: out.ControlProgram,
 				txHash:         tx.ID,
 				outputIndex:    uint32(j),
+				sourceID:       tx.Results[j].SourceID,
+				sourcePos:      tx.Results[j].SourcePos,
+				refData:        tx.Results[j].RefDataHash,
 			}
 			outs = append(outs, out)
 		}
@@ -127,28 +158,16 @@ func (m *Manager) indexAccountUTXOs(ctx context.Context, b *bc.Block) error {
 	}
 
 	err = m.upsertConfirmedAccountOutputs(ctx, accOuts, blockPositions, b)
-	if err != nil {
-		return errors.Wrap(err, "upserting confirmed account utxos")
-	}
-
-	// Delete consumed account UTXOs.
-	delOutputIDs := prevoutDBKeys(b.Transactions...)
-	const delQ = `
-		DELETE FROM account_utxos
-		WHERE output_id IN (SELECT unnest($1::bytea[]))
-	`
-	_, err = m.db.Exec(ctx, delQ, delOutputIDs)
-	return errors.Wrap(err, "deleting spent account utxos")
+	return errors.Wrap(err, "upserting confirmed account utxos")
 }
 
 func prevoutDBKeys(txs ...*bc.Tx) (outputIDs pq.ByteaArray) {
 	for _, tx := range txs {
-		for _, in := range tx.Inputs {
+		for i, in := range tx.Inputs {
 			if in.IsIssuance() {
 				continue
 			}
-			o := in.SpentOutputID()
-			outputIDs = append(outputIDs, o.Bytes())
+			outputIDs = append(outputIDs, tx.SpentOutputIDs[i].Bytes())
 		}
 	}
 	return
@@ -172,16 +191,17 @@ func (m *Manager) loadAccountInfo(ctx context.Context, outs []*rawOutput) ([]*ac
 	result := make([]*accountOutput, 0, len(outs))
 
 	const q = `
-		SELECT signer_id, key_index, control_program
+		SELECT signer_id, key_index, control_program, change
 		FROM account_control_programs
 		WHERE control_program IN (SELECT unnest($1::bytea[]))
 	`
-	err := pg.ForQueryRows(ctx, m.db, q, scripts, func(accountID string, keyIndex uint64, program []byte) {
+	err := pg.ForQueryRows(ctx, m.db, q, scripts, func(accountID string, keyIndex uint64, program []byte, change bool) {
 		for _, out := range outsByScript[string(program)] {
 			newOut := &accountOutput{
 				rawOutput: *out,
 				AccountID: accountID,
 				keyIndex:  keyIndex,
+				change:    change,
 			}
 			result = append(result, newOut)
 		}
@@ -198,36 +218,39 @@ func (m *Manager) loadAccountInfo(ctx context.Context, outs []*rawOutput) ([]*ac
 // block confirmation data will in the row will be updated.
 func (m *Manager) upsertConfirmedAccountOutputs(ctx context.Context, outs []*accountOutput, pos map[bc.Hash]uint32, block *bc.Block) error {
 	var (
-		txHash    pq.ByteaArray
-		index     pg.Uint32s
 		outputID  pq.ByteaArray
 		assetID   pq.ByteaArray
 		amount    pq.Int64Array
 		accountID pq.StringArray
 		cpIndex   pq.Int64Array
 		program   pq.ByteaArray
+		sourceID  pq.ByteaArray
+		sourcePos pq.Int64Array
+		refData   pq.ByteaArray
+		change    pq.BoolArray
 	)
 	for _, out := range outs {
-		txHash = append(txHash, out.txHash[:])
-		index = append(index, out.outputIndex)
 		outputID = append(outputID, out.OutputID.Bytes())
 		assetID = append(assetID, out.AssetID[:])
 		amount = append(amount, int64(out.Amount))
 		accountID = append(accountID, out.AccountID)
 		cpIndex = append(cpIndex, int64(out.keyIndex))
 		program = append(program, out.ControlProgram)
+		sourceID = append(sourceID, out.sourceID[:])
+		sourcePos = append(sourcePos, int64(out.sourcePos))
+		refData = append(refData, out.refData[:])
+		change = append(change, out.change)
 	}
 
 	const q = `
-		INSERT INTO account_utxos (tx_hash, index, output_id, asset_id, amount, account_id, control_program_index,
-			control_program, confirmed_in)
-		SELECT unnest($1::bytea[]), unnest($2::bigint[]), unnest($3::bytea[]), unnest($4::bytea[]),  unnest($5::bigint[]),
-			   unnest($6::text[]), unnest($7::bigint[]), unnest($8::bytea[]), $9
-		ON CONFLICT (tx_hash, index) DO NOTHING
+		INSERT INTO account_utxos (output_id, asset_id, amount, account_id, control_program_index,
+			control_program, confirmed_in, source_id, source_pos, ref_data_hash, change)
+		SELECT unnest($1::bytea[]), unnest($2::bytea[]),  unnest($3::bigint[]),
+			   unnest($4::text[]), unnest($5::bigint[]), unnest($6::bytea[]), $7,
+			   unnest($8::bytea[]), unnest($9::bigint[]), unnest($10::bytea[]), unnest($11::boolean[])
+		ON CONFLICT (output_id) DO NOTHING
 	`
 	_, err := m.db.Exec(ctx, q,
-		txHash,
-		index,
 		outputID,
 		assetID,
 		amount,
@@ -235,6 +258,10 @@ func (m *Manager) upsertConfirmedAccountOutputs(ctx context.Context, outs []*acc
 		cpIndex,
 		program,
 		block.Height,
+		sourceID,
+		sourcePos,
+		refData,
+		change,
 	)
 	return errors.Wrap(err)
 }

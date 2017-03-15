@@ -7,62 +7,46 @@ import (
 
 	"chain/database/pg/pgtest"
 	"chain/protocol/bc"
+	"chain/protocol/memstore"
 	"chain/protocol/prottest"
-	"chain/protocol/state"
 )
 
 const sampleAccountUTXOs = `
 	INSERT INTO account_utxos
-	(tx_hash, index, output_id, asset_id, amount, account_id, control_program_index,
-     control_program, confirmed_in) VALUES (
-		decode('270b725a94429496a178c56b390a89d03f801fe2ee992d90cf4fdf7d7855318e', 'hex'),
-		0,
+	(output_id, asset_id, amount, account_id, control_program_index,
+     control_program, confirmed_in, source_id, source_pos, ref_data_hash, change) VALUES (
 		decode('9886ae2dc24b6d868c68768038c43801e905a62f1a9b826ca0dc357f00c30117', 'hex'),
 		decode('df1df9d4f66437ab5be715e4d1faeb29d24c80a6dc8276d6a630f05c5f1f7693', 'hex'),
-		1000, 'accEXAMPLE', 1, '\x6a'::bytea, 1);
+		1000, 'accEXAMPLE', 1, '\x6a'::bytea, 1,
+		decode('905a62f1a9b826ca0dc357f00c301179886ae2dc24b6d868c68768038c43801e', 'hex'),
+		0, decode('0000000000000000000000000000000000000000000000000000000000000000', 'hex'),
+		false);
 `
 
 func TestCancelReservation(t *testing.T) {
 	ctx := context.Background()
-	c := prottest.NewChain(t)
 	_, db := pgtest.NewDB(t, pgtest.SchemaPath)
-
 	_, err := db.Exec(ctx, sampleAccountUTXOs)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var h, outid bc.Hash
-	var assetID bc.AssetID
-	err = h.UnmarshalText([]byte("270b725a94429496a178c56b390a89d03f801fe2ee992d90cf4fdf7d7855318e"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Create a Chain with our output already in the state tree.
+	var outid bc.Hash
 	err = outid.UnmarshalText([]byte("9886ae2dc24b6d868c68768038c43801e905a62f1a9b826ca0dc357f00c30117"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	outputID := bc.OutputID{outid}
-	err = assetID.UnmarshalText([]byte("df1df9d4f66437ab5be715e4d1faeb29d24c80a6dc8276d6a630f05c5f1f7693"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Fake the output in the state tree.
-	_, s := c.State()
-	err = s.Tree.Insert(state.OutputTreeItem(outputID))
-	if err != nil {
-		t.Error(err)
-	}
+	c := prottest.NewChainWithStorage(t, memstore.New(), outid)
 
 	utxoDB := newReserver(db, c, nil)
-	res, err := utxoDB.ReserveUTXO(ctx, outputID, nil, time.Now())
+	res, err := utxoDB.ReserveUTXO(ctx, outid, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify that the UTXO is reserved.
-	_, err = utxoDB.ReserveUTXO(ctx, outputID, nil, time.Now())
+	_, err = utxoDB.ReserveUTXO(ctx, outid, nil, time.Now())
 	if err != ErrReserved {
 		t.Fatalf("got=%s want=%s", err, ErrReserved)
 	}
@@ -74,7 +58,7 @@ func TestCancelReservation(t *testing.T) {
 	}
 
 	// Reserving again should succeed.
-	_, err = utxoDB.ReserveUTXO(ctx, outputID, nil, time.Now())
+	_, err = utxoDB.ReserveUTXO(ctx, outid, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

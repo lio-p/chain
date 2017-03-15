@@ -2,12 +2,10 @@ package account
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 
 	"chain/core/signers"
 	"chain/core/txbuilder"
-	"chain/database/pg"
 	chainjson "chain/encoding/json"
 	"chain/errors"
 	"chain/log"
@@ -95,7 +93,7 @@ func (a *spendAction) Build(ctx context.Context, b *txbuilder.TemplateBuilder) e
 	return nil
 }
 
-func (m *Manager) NewSpendUTXOAction(outputID bc.OutputID) txbuilder.Action {
+func (m *Manager) NewSpendUTXOAction(outputID bc.Hash) txbuilder.Action {
 	return &spendUTXOAction{
 		accounts: m,
 		OutputID: &outputID,
@@ -110,35 +108,18 @@ func (m *Manager) DecodeSpendUTXOAction(data []byte) (txbuilder.Action, error) {
 
 type spendUTXOAction struct {
 	accounts *Manager
-	OutputID *bc.OutputID `json:"output_id"`
-	TxHash   *bc.Hash     `json:"transaction_id"`
-	TxOut    *uint32      `json:"position"`
+	OutputID *bc.Hash `json:"output_id"`
 
 	ReferenceData chainjson.Map `json:"reference_data"`
 	ClientToken   *string       `json:"client_token"`
 }
 
 func (a *spendUTXOAction) Build(ctx context.Context, b *txbuilder.TemplateBuilder) error {
-	var outid bc.OutputID
-
-	if a.OutputID != nil {
-		outid = *a.OutputID
-	} else if a.TxHash != nil && a.TxOut != nil {
-		// This is compatibility layer - legacy apps can spend outputs via the raw <txid:index> pair.
-		q := `SELECT output_id FROM account_utxos WHERE tx_hash=$1 AND index=$2`
-		err := a.accounts.utxoDB.db.QueryRow(ctx, q, *a.TxHash, *a.TxOut).Scan(&outid)
-		if err == sql.ErrNoRows {
-			return pg.ErrUserInputNotFound
-		} else if err != nil {
-			return err
-		}
-	} else {
-		// Note: here we do not attempt to check if txid is present, but position is missing, or vice versa.
-		// Instead, the user has to update their code to use the new API anyway.
+	if a.OutputID == nil {
 		return txbuilder.MissingFieldsError("output_id")
 	}
 
-	res, err := a.accounts.utxoDB.ReserveUTXO(ctx, outid, a.ClientToken, b.MaxTime())
+	res, err := a.accounts.utxoDB.ReserveUTXO(ctx, *a.OutputID, a.ClientToken, b.MaxTime())
 	if err != nil {
 		return err
 	}
@@ -170,16 +151,14 @@ func utxoToInputs(ctx context.Context, account *signers.Signer, u *utxo, refData
 	*txbuilder.SigningInstruction,
 	error,
 ) {
-	txInput := bc.NewSpendInput(u.OutputID, nil, u.AssetID, u.Amount, u.ControlProgram, refData)
+	txInput := bc.NewSpendInput(nil, u.SourceID, u.AssetID, u.Amount, u.SourcePos, u.ControlProgram, u.RefDataHash, refData)
 
 	sigInst := &txbuilder.SigningInstruction{
 		AssetAmount: u.AssetAmount,
 	}
 
 	path := signers.Path(account, signers.AccountKeySpace, u.ControlProgramIndex)
-	keyIDs := txbuilder.KeyIDs(account.XPubs, path)
-
-	sigInst.AddWitnessKeys(keyIDs, account.Quorum)
+	sigInst.AddWitnessKeys(account.XPubs, path, account.Quorum)
 
 	return txInput, sigInst, nil
 }

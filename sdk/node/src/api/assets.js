@@ -2,23 +2,55 @@ const shared = require('../shared')
 
 /**
  * An asset is a type of value that can be issued on a blockchain. All units of
- * a given asset are fungible.
+ * a given asset are fungible. Units of an asset can be transacted directly
+ * between parties without the involvement of the issuer.
  * <br/><br/>
- * Units of an asset can be transacted directly between parties without the
- * involvement of the issuer.
+ * More info: {@link https://chain.com/docs/core/build-applications/assets}
+ * @typedef {Object} Asset
+ * @global
+ *
+ * @property {String} id
+ * Globally unique identifier of the asset.
+ * Asset version 1 specifies the asset id as the hash of:
+ * - the asset version
+ * - the asset's issuance program
+ * - the core's VM version
+ * - the hash of the network's initial block
+ *
+ * @property {String} alias
+ * User specified, unique identifier.
+ *
+ * @property {String} issuanceProgram
+ *
+ * @property {Key[]} keys
+ * The list of keys used to issue units of the asset.
+ *
+ * @property {Number} quorum
+ * The number of signatures required to issue new units of the asset.
+ *
+ * @property {Object} defintion
+ * User-specified, arbitrary/unstructured data visible across
+ * blockchain networks. Version 1 assets specify the definition in their
+ * issuance programs, rendering the definition immutable.
+ *
+ * @property {Object} tags
+ * User-specified tag structure for the asset.
+ */
+
+/**
+ * API for interacting with {@link Asset assets}.
  * <br/><br/>
  * More info: {@link https://chain.com/docs/core/build-applications/assets}
  * @module AssetsApi
  */
 const assetsAPI = (client) => {
   /**
-   * @typedef Assets~createRequest
-   * @type {Object}
+   * @typedef {Object} createRequest
    *
    * @property {String} [alias]
    * User specified, unique identifier.
    *
-   * @property {string[]} rootXpubs
+   * @property {String[]} rootXpubs
    * The list of keys used to create the issuance program for the asset.
    *
    * @property {Number} quorum
@@ -35,25 +67,30 @@ const assetsAPI = (client) => {
     /**
      * Create a new asset.
      *
-     * @param {Assets~createRequest} params - Parameters for asset creation.
+     * @param {module:AssetsApi~createRequest} params - Parameters for asset creation.
      * @param {objectCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
+     * @returns {Promise<Asset>} Newly created asset.
      */
     create: (params, cb) => shared.create(client, '/create-asset', params, {cb}),
 
     /**
      * Create multiple new assets.
      *
-     * @param {Assets~createRequest[]} params - Parameters for creation of multiple assets.
+     * @param {module:AssetsApi~createRequest[]} params - Parameters for creation of multiple assets.
      * @param {batchCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
+     * @returns {Promise<BatchResponse<Asset>>} Newly created assets.
      */
     createBatch: (params, cb) => shared.createBatch(client, '/create-asset', params, {cb}),
 
     /**
      * Get one page of assets matching the specified query.
      *
-     * @param {Query} params={} - Filter and pagination information.
+     * @param {Object} params={} - Filter and pagination information.
+     * @param {String} params.filter - Filter string, see {@link https://chain.com/docs/core/build-applications/queries}.
+     * @param {Array<String|Number>} params.filterParams - Parameter values for filter string (if needed).
+     * @param {Number} params.pageSize - Number of items to return in result set.
      * @param {pageCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
-     * @returns {Promise<Page>} Requested page of results.
+     * @returns {Promise<Page<Asset>>} Requested page of results.
      */
     query: (params, cb) => shared.query(client, 'assets', '/list-assets', params, {cb}),
 
@@ -61,8 +98,11 @@ const assetsAPI = (client) => {
      * Request all assets matching the specified query, calling the
      * supplied processor callback with each item individually.
      *
-     * @param {Query} params={} - Filter and pagination information.
-     * @param {QueryProcessor} processor - Processing callback.
+     * @param {Object} params={} - Filter and pagination information.
+     * @param {String} params.filter - Filter string, see {@link https://chain.com/docs/core/build-applications/queries}.
+     * @param {Number} params.pageSize - Number of items to return in result set.
+     * @param {Array<String|Number>} params.filterParams - Parameter values for filter string (if needed).
+     * @param {QueryProcessor<Asset>} processor - Processing callback.
      * @param {objectCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
      * @returns {Promise} A promise resolved upon processing of all items, or
      *                   rejected on error.

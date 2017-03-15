@@ -43,10 +43,8 @@ func Annotated(a *Asset) (*query.AnnotatedAsset, error) {
 
 	aa := &query.AnnotatedAsset{
 		ID:              a.AssetID,
-		VMVersion:       a.VMVersion,
 		Definition:      &jsonDefinition,
 		Tags:            &jsonTags,
-		RawDefinition:   chainjson.HexBytes(a.RawDefinition()),
 		IssuanceProgram: chainjson.HexBytes(a.IssuanceProgram),
 	}
 	if a.Alias != nil {
@@ -72,6 +70,7 @@ func Annotated(a *Asset) (*query.AnnotatedAsset, error) {
 		pubkeys, quorum, err := vmutil.ParseP2SPMultiSigProgram(a.IssuanceProgram)
 		if err == nil {
 			for _, pubkey := range pubkeys {
+				pubkey := pubkey
 				aa.Keys = append(aa.Keys, &query.AssetKey{
 					AssetPubkey: chainjson.HexBytes(pubkey[:]),
 				})

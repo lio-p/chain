@@ -1,12 +1,6 @@
 # Chain Core changelog
 
-Changelogs are maintained for each sub-package
+Please refer to changelogs by release version:
 
-- [cored](./cmd/cored/CHANGELOG.md) (Chain Core server)
-- Installers
-  - [Mac](./installer/mac/CHANGELOG.md)
-  - [Windows](./installer/windows/CHANGELOG.md)
-- SDKs
-  - [Java](./sdk/java/CHANGELOG.md)
-  - [Node.js](./sdk/node/CHANGELOG.md)
-  - [Ruby](./sdk/ruby/CHANGELOG.md)
+- [1.1](https://github.com/chain/chain/blob/1.1-stable/CHANGELOG.md) (current)
+- [1.0](https://github.com/chain/chain/blob/1.0-stable/CHANGELOG.md)

@@ -7,8 +7,10 @@ import (
 
 	"github.com/lib/pq"
 
+	"chain/core/pin"
 	"chain/database/pg"
 	"chain/errors"
+	"chain/protocol"
 	"chain/protocol/bc"
 )
 
@@ -17,6 +19,24 @@ const (
 	// with the transaction block processor.
 	TxPinName = "tx"
 )
+
+// NewIndexer constructs a new indexer for indexing transactions.
+func NewIndexer(db pg.DB, c *protocol.Chain, pinStore *pin.Store) *Indexer {
+	indexer := &Indexer{
+		db:       db,
+		c:        c,
+		pinStore: pinStore,
+	}
+	return indexer
+}
+
+// Indexer creates, updates and queries against indexes.
+type Indexer struct {
+	db         pg.DB
+	c          *protocol.Chain
+	pinStore   *pin.Store
+	annotators []Annotator
+}
 
 // Annotator describes a function capable of adding annotations
 // to transactions, inputs and outputs.
@@ -39,6 +59,7 @@ func (ind *Indexer) ProcessBlocks(ctx context.Context) {
 // saves all annotated transactions to the database.
 func (ind *Indexer) IndexTransactions(ctx context.Context, b *bc.Block) error {
 	<-ind.pinStore.PinWaiter("asset", b.Height)
+	<-ind.pinStore.PinWaiter("account", b.Height)
 
 	err := ind.insertBlock(ctx, b)
 	if err != nil {
@@ -73,26 +94,14 @@ func (ind *Indexer) insertAnnotatedTxs(ctx context.Context, b *bc.Block) ([]*Ann
 		annotatedTxs     = make([]*AnnotatedTx, 0, len(b.Transactions))
 		locals           = pq.BoolArray(make([]bool, 0, len(b.Transactions)))
 		referenceDatas   = pq.StringArray(make([]string, 0, len(b.Transactions)))
-		outputIDs        = pq.ByteaArray(make([][]byte, 0))
 	)
-	for _, tx := range b.Transactions {
-		for _, in := range tx.Inputs {
-			if !in.IsIssuance() {
-				outputIDs = append(outputIDs, in.SpentOutputID().Bytes())
-			}
-		}
-	}
-	outpoints, err := ind.loadOutpoints(ctx, outputIDs)
-	if err != nil {
-		return nil, err
-	}
 
 	// Build the fully annotated transactions.
 	for pos, tx := range b.Transactions {
-		annotatedTxs = append(annotatedTxs, buildAnnotatedTransaction(tx, b, uint32(pos), outpoints))
+		annotatedTxs = append(annotatedTxs, buildAnnotatedTransaction(tx, b, uint32(pos)))
 	}
 	for _, annotator := range ind.annotators {
-		err = annotator(ctx, annotatedTxs)
+		err := annotator(ctx, annotatedTxs)
 		if err != nil {
 			return nil, errors.Wrap(err, "adding external annotations")
 		}
@@ -120,7 +129,7 @@ func (ind *Indexer) insertAnnotatedTxs(ctx context.Context, b *bc.Block) ([]*Ann
 			unnest($6::jsonb[]), unnest($7::boolean[]), unnest($8::jsonb[])
 		ON CONFLICT (block_height, tx_pos) DO NOTHING;
 	`
-	_, err = ind.db.Exec(ctx, insertQ, b.Height, b.Hash(), b.Time(), positions,
+	_, err := ind.db.Exec(ctx, insertQ, b.Height, b.Hash(), b.Time(), positions,
 		hashes, annotatedTxBlobs, locals, referenceDatas)
 	if err != nil {
 		return nil, errors.Wrap(err, "inserting annotated_txs to db")
@@ -146,7 +155,6 @@ func (ind *Indexer) insertAnnotatedInputs(ctx context.Context, b *bc.Block, anno
 		inputReferenceDatas   pq.StringArray
 		inputLocals           pq.BoolArray
 		inputSpentOutputIDs   pq.ByteaArray
-		inputSpentOutputs     []sql.NullString
 	)
 
 	for _, annotatedTx := range annotatedTxs {
@@ -171,18 +179,9 @@ func (ind *Indexer) insertAnnotatedInputs(ctx context.Context, b *bc.Block, anno
 			inputReferenceDatas = append(inputReferenceDatas, string(*in.ReferenceData))
 			inputLocals = append(inputLocals, bool(in.IsLocal))
 			if in.SpentOutputID != nil {
-				inputSpentOutputIDs = append(inputSpentOutputIDs, in.SpentOutputID.Hash[:])
+				inputSpentOutputIDs = append(inputSpentOutputIDs, in.SpentOutputID[:])
 			} else {
 				inputSpentOutputIDs = append(inputSpentOutputIDs, nil)
-			}
-			if in.SpentOutput != nil {
-				b, err := json.Marshal(in.SpentOutput)
-				if err != nil {
-					return errors.Wrap(err)
-				}
-				inputSpentOutputs = append(inputSpentOutputs, sql.NullString{String: string(b), Valid: true})
-			} else {
-				inputSpentOutputs = append(inputSpentOutputs, sql.NullString{})
 			}
 		}
 	}
@@ -190,38 +189,18 @@ func (ind *Indexer) insertAnnotatedInputs(ctx context.Context, b *bc.Block, anno
 		INSERT INTO annotated_inputs (tx_hash, index, type,
 			asset_id, asset_alias, asset_definition, asset_tags, asset_local,
 			amount, account_id, account_alias, account_tags, issuance_program,
-			reference_data, local, spent_output_id, spent_output)
+			reference_data, local, spent_output_id)
 		SELECT unnest($1::bytea[]), unnest($2::integer[]), unnest($3::text[]), unnest($4::bytea[]),
 		unnest($5::text[]), unnest($6::jsonb[]), unnest($7::jsonb[]), unnest($8::boolean[]),
 		unnest($9::bigint[]), unnest($10::text[]), unnest($11::text[]), unnest($12::jsonb[]),
-		unnest($13::bytea[]), unnest($14::jsonb[]), unnest($15::boolean[]), unnest($16::bytea[]), unnest($17::jsonb[])
+		unnest($13::bytea[]), unnest($14::jsonb[]), unnest($15::boolean[]), unnest($16::bytea[])
 		ON CONFLICT (tx_hash, index) DO NOTHING;
 	`
 	_, err := ind.db.Exec(ctx, insertQ, inputTxHashes, inputIndexes, inputTypes, inputAssetIDs,
 		inputAssetAliases, inputAssetDefinitions, pq.Array(inputAssetTags), inputAssetLocals,
 		inputAmounts, pq.Array(inputAccountIDs), pq.Array(inputAccountAliases), pq.Array(inputAccountTags),
-		inputIssuancePrograms, inputReferenceDatas, inputLocals, inputSpentOutputIDs, pq.Array(inputSpentOutputs))
+		inputIssuancePrograms, inputReferenceDatas, inputLocals, inputSpentOutputIDs)
 	return errors.Wrap(err, "batch inserting annotated inputs")
-}
-
-func (ind *Indexer) loadOutpoints(ctx context.Context, outputIDs pq.ByteaArray) (map[bc.OutputID]bc.Outpoint, error) {
-	const q = `
-		SELECT tx_hash, output_index, output_id
-		FROM annotated_outputs
-		WHERE output_id IN (SELECT unnest($1::bytea[]))
-	`
-	results := make(map[bc.OutputID]bc.Outpoint)
-	err := pg.ForQueryRows(ctx, ind.db, q, outputIDs, func(txHash bc.Hash, outputIndex uint32, outid bc.Hash) {
-		oid := bc.OutputID{outid}
-		results[oid] = bc.Outpoint{
-			Hash:  txHash,
-			Index: outputIndex,
-		}
-	})
-	if err != nil {
-		return nil, errors.Wrap(err)
-	}
-	return results, nil
 }
 
 func (ind *Indexer) insertAnnotatedOutputs(ctx context.Context, b *bc.Block, annotatedTxs []*AnnotatedTx) error {
@@ -247,15 +226,14 @@ func (ind *Indexer) insertAnnotatedOutputs(ctx context.Context, b *bc.Block, ann
 		prevoutIDs             pq.ByteaArray
 	)
 	for pos, tx := range b.Transactions {
-		for _, in := range tx.Inputs {
+		for i, in := range tx.Inputs {
 			if !in.IsIssuance() {
-				prevoutID := in.SpentOutputID()
-				prevoutIDs = append(prevoutIDs, prevoutID.Bytes())
+				prevoutIDs = append(prevoutIDs, tx.SpentOutputIDs[i].Bytes())
 			}
 		}
 
 		for outIndex, out := range annotatedTxs[pos].Outputs {
-			outputIDs = append(outputIDs, out.OutputID.Hash[:])
+			outputIDs = append(outputIDs, out.OutputID[:])
 			outputTxPositions = append(outputTxPositions, uint32(pos))
 			outputIndexes = append(outputIndexes, uint32(outIndex))
 			outputTxHashes = append(outputTxHashes, tx.ID[:])

@@ -34,10 +34,12 @@ var (
 
 // utxo describes an individual account utxo.
 type utxo struct {
-	bc.Outpoint // TODO(oleg): remove this one
-	bc.OutputID
+	OutputID bc.Hash
+	SourceID bc.Hash
 	bc.AssetAmount
+	SourcePos      uint64
 	ControlProgram []byte
+	RefDataHash    bc.Hash
 
 	AccountID           string
 	ControlProgramIndex uint64
@@ -143,7 +145,7 @@ func (re *reserver) reserve(ctx context.Context, src source, amount uint64, clie
 
 // ReserveUTXO reserves a specific utxo for spending. The resulting
 // reservation expires at exp.
-func (re *reserver) ReserveUTXO(ctx context.Context, out bc.OutputID, clientToken *string, exp time.Time) (*reservation, error) {
+func (re *reserver) ReserveUTXO(ctx context.Context, out bc.Hash, clientToken *string, exp time.Time) (*reservation, error) {
 	if clientToken == nil {
 		return re.reserveUTXO(ctx, out, exp, nil)
 	}
@@ -154,7 +156,7 @@ func (re *reserver) ReserveUTXO(ctx context.Context, out bc.OutputID, clientToke
 	return untypedRes.(*reservation), err
 }
 
-func (re *reserver) reserveUTXO(ctx context.Context, out bc.OutputID, exp time.Time, clientToken *string) (*reservation, error) {
+func (re *reserver) reserveUTXO(ctx context.Context, out bc.Hash, exp time.Time, clientToken *string) (*reservation, error) {
 	u, err := findSpecificUTXO(ctx, re.db, out)
 	if err != nil {
 		return nil, err
@@ -250,8 +252,8 @@ func (re *reserver) source(src source) *sourceReserver {
 		heightFn: func() uint64 {
 			return re.pinStore.Height(PinName)
 		},
-		cached:   make(map[bc.OutputID]*utxo),
-		reserved: make(map[bc.OutputID]uint64),
+		cached:   make(map[bc.Hash]*utxo),
+		reserved: make(map[bc.Hash]uint64),
 	}
 	re.sources[src] = sr
 	return sr
@@ -264,8 +266,8 @@ type sourceReserver struct {
 	heightFn func() uint64
 
 	mu         sync.Mutex
-	cached     map[bc.OutputID]*utxo
-	reserved   map[bc.OutputID]uint64
+	cached     map[bc.Hash]*utxo
+	reserved   map[bc.Hash]uint64
 	lastHeight uint64
 }
 
@@ -381,24 +383,24 @@ func (sr *sourceReserver) refillCache(ctx context.Context) error {
 
 func findMatchingUTXOs(ctx context.Context, db pg.DB, src source, height uint64) ([]*utxo, error) {
 	const q = `
-		SELECT tx_hash, index, output_id, amount, control_program_index, control_program
+		SELECT output_id, amount, control_program_index, control_program,
+			source_id, source_pos, ref_data_hash
 		FROM account_utxos
 		WHERE account_id = $1 AND asset_id = $2 AND confirmed_in > $3
 	`
 	var utxos []*utxo
 	err := pg.ForQueryRows(ctx, db, q, src.AccountID, src.AssetID, height,
-		func(txHash bc.Hash, index uint32, oid bc.OutputID, amount uint64, cpIndex uint64, controlProg []byte) {
+		func(oid bc.Hash, amount uint64, cpIndex uint64, controlProg []byte, sourceID bc.Hash, sourcePos uint64, refData bc.Hash) {
 			utxos = append(utxos, &utxo{
-				Outpoint: bc.Outpoint{
-					Hash:  txHash,
-					Index: index,
-				},
 				OutputID: oid,
+				SourceID: sourceID,
 				AssetAmount: bc.AssetAmount{
 					Amount:  amount,
 					AssetID: src.AssetID,
 				},
+				SourcePos:           sourcePos,
 				ControlProgram:      controlProg,
+				RefDataHash:         refData,
 				AccountID:           src.AccountID,
 				ControlProgramIndex: cpIndex,
 			})
@@ -409,15 +411,25 @@ func findMatchingUTXOs(ctx context.Context, db pg.DB, src source, height uint64)
 	return utxos, nil
 }
 
-func findSpecificUTXO(ctx context.Context, db pg.DB, out bc.OutputID) (*utxo, error) {
+func findSpecificUTXO(ctx context.Context, db pg.DB, out bc.Hash) (*utxo, error) {
 	const q = `
-		SELECT account_id, asset_id, amount, control_program_index, control_program
+		SELECT account_id, asset_id, amount, control_program_index, control_program,
+			source_id, source_pos, ref_data_hash
 		FROM account_utxos
 		WHERE output_id = $1
 	`
 	u := new(utxo)
 	// TODO(oleg): maybe we need to scan txid:index too from here...
-	err := db.QueryRow(ctx, q, out).Scan(&u.AccountID, &u.AssetID, &u.Amount, &u.ControlProgramIndex, &u.ControlProgram)
+	err := db.QueryRow(ctx, q, out).Scan(
+		&u.AccountID,
+		&u.AssetID,
+		&u.Amount,
+		&u.ControlProgramIndex,
+		&u.ControlProgram,
+		&u.SourceID,
+		&u.SourcePos,
+		&u.RefDataHash,
+	)
 	if err == sql.ErrNoRows {
 		return nil, pg.ErrUserInputNotFound
 	} else if err != nil {

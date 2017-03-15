@@ -169,10 +169,7 @@ func (bh *BlockHeader) Value() (driver.Value, error) {
 
 // Hash returns complete hash of the block header.
 func (bh *BlockHeader) Hash() Hash {
-	h, err := BlockHeaderHashFunc(bh)
-	if err != nil {
-		panic(err)
-	}
+	h, _ := mapBlockHeader(bh)
 	return h
 }
 
@@ -255,13 +252,6 @@ func (bh *BlockHeader) readFrom(r io.Reader) (uint8, error) {
 func (bh *BlockHeader) WriteTo(w io.Writer) (int64, error) {
 	ew := errors.NewWriter(w)
 	bh.writeTo(ew, SerBlockHeader)
-	return ew.Written(), ew.Err()
-}
-
-// WriteForSigTo writes bh to w in a format suitable for signing.
-func (bh *BlockHeader) WriteForSigTo(w io.Writer) (int64, error) {
-	ew := errors.NewWriter(w)
-	bh.writeTo(ew, SerBlockSigHash)
 	return ew.Written(), ew.Err()
 }
 

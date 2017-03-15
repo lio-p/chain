@@ -57,9 +57,9 @@ func main() {
 	// Ensure that we can access cored.
 	err := client.Call(ctx, "/health", nil, nil)
 	if err != nil {
-		log.Fatal(ctx, log.KeyError, err)
+		log.Fatalkv(ctx, log.KeyError, err)
 	}
-	log.Messagef(ctx, "Successfully pinged cored at %s.", *coredAddr)
+	log.Printf(ctx, "Successfully pinged cored at %s.", *coredAddr)
 
 	// Periodically, report metrics.
 	latestNumRots := make(map[string]int)
@@ -252,9 +252,9 @@ type attributes struct {
 }
 
 type debugVarsResponse struct {
-	BuildCommit string               `json:"buildcommit"`
-	BuildDate   string               `json:"builddate"`
-	BuildTag    string               `json:"buildtag"`
+	BuildCommit string               `json:"build_commit"`
+	BuildDate   string               `json:"build_date"`
+	BuildTag    string               `json:"build_tag"`
 	Latency     map[string]latencies `json:"latency"`
 	Memstats    runtime.MemStats     `json:"memstats"`
 	ProcessID   string               `json:"processID"`

@@ -7,6 +7,20 @@ const shared = require('../shared')
  * unspent output objects
  * <br/><br/>
  * More info: {@link https://chain.com/docs/core/build-applications/queries}
+ * @typedef {Object} Balance
+ * @global
+ *
+ * @property {Number} amount
+ * Sum of the unspent outputs.
+ *
+ * @property {Object} sumBy
+ * List of parameters on which to sum unspent outputs.
+ */
+
+/**
+* API for interacting with {@link Balance balances}.
+ * <br/><br/>
+ * More info: {@link https://chain.com/docs/core/build-applications/queries}
  * @module BalancesApi
  */
 const balancesAPI = (client) => {
@@ -14,9 +28,14 @@ const balancesAPI = (client) => {
     /**
      * Get one page of balances matching the specified query.
      *
-     * @param {Query} params={} - Filter and pagination information.
+     * @param {Object} params={} - Filter and pagination information.
+     * @param {String} params.filter - Filter string, see {@link https://chain.com/docs/core/build-applications/queries}.
+     * @param {Array<String|Number>} params.filterParams - Parameter values for filter string (if needed).
+     * @param {Array<String>} params.sumBy - List of unspent output attributes to sum by.
+     * @param {Integer} params.timestamp - A millisecond Unix timestamp. By using this parameter, you can perform queries that reflect the state of the blockchain at different points in time.
+     * @param {Number} params.pageSize - Number of items to return in result set.
      * @param {pageCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
-     * @returns {Promise<Page>} Requested page of results.
+     * @returns {Promise<Page<Balance>>} Requested page of results.
      */
     query: (params, cb) => shared.query(client, 'balances', '/list-balances', params, {cb}),
 
@@ -24,8 +43,13 @@ const balancesAPI = (client) => {
      * Request all balances matching the specified query, calling the
      * supplied processor callback with each item individually.
      *
-     * @param {Query} params={} - Filter and pagination information.
-     * @param {QueryProcessor} processor - Processing callback.
+     * @param {Object} params={} - Filter and pagination information.
+     * @param {String} params.filter - Filter string, see {@link https://chain.com/docs/core/build-applications/queries}.
+     * @param {Array<String|Number>} params.filterParams - Parameter values for filter string (if needed).
+     * @param {Array<String>} params.sumBy - List of unspent output attributes to sum by.
+     * @param {Integer} params.timestamp - A millisecond Unix timestamp. By using this parameter, you can perform queries that reflect the state of the blockchain at different points in time.
+     * @param {Number} params.pageSize - Number of items to return in result set.
+     * @param {QueryProcessor<Balance>} processor - Processing callback.
      * @param {objectCallback} [callback] - Optional callback. Use instead of Promise return value as desired.
      * @returns {Promise} A promise resolved upon processing of all items, or
      *                   rejected on error.

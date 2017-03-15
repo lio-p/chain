@@ -17,14 +17,15 @@ func TestUniqueIssuance(t *testing.T) {
 	trueProg := []byte{byte(vm.OP_TRUE)}
 	assetID := bc.ComputeAssetID(trueProg, initialBlockHash, 1, bc.EmptyStringHash)
 	now := time.Now()
+	nowMS := bc.Millis(now)
 	issuanceInp := bc.NewIssuanceInput(nil, 1, nil, initialBlockHash, trueProg, nil, nil)
 
 	// Transaction with empty nonce (and no other inputs) is invalid
-	_, err := bc.TxHashesFunc(&bc.TxData{
+	_, err := bc.ComputeTxHashes(&bc.TxData{
 		Version: 1,
 		Inputs:  []*bc.TxInput{issuanceInp},
 		Outputs: []*bc.TxOutput{bc.NewTxOutput(assetID, 1, trueProg, nil)},
-		MinTime: bc.Millis(now),
+		MinTime: nowMS,
 		MaxTime: bc.Millis(now.Add(time.Hour)),
 	})
 	if err == nil {
@@ -38,7 +39,7 @@ func TestUniqueIssuance(t *testing.T) {
 		Version: 1,
 		Inputs:  []*bc.TxInput{issuanceInp},
 		Outputs: []*bc.TxOutput{bc.NewTxOutput(assetID, 1, trueProg, nil)},
-		MinTime: bc.Millis(now),
+		MinTime: nowMS,
 	})
 	if CheckTxWellFormed(tx) == nil {
 		t.Errorf("expected tx with unbounded time window to fail validation")
@@ -59,7 +60,7 @@ func TestUniqueIssuance(t *testing.T) {
 		Version: 1,
 		Inputs:  []*bc.TxInput{issuanceInp, issuanceInp},
 		Outputs: []*bc.TxOutput{bc.NewTxOutput(assetID, 2, trueProg, nil)},
-		MinTime: bc.Millis(now),
+		MinTime: nowMS,
 		MaxTime: bc.Millis(now.Add(time.Hour)),
 	})
 	if CheckTxWellFormed(tx) == nil {
@@ -71,7 +72,7 @@ func TestUniqueIssuance(t *testing.T) {
 		Version: 1,
 		Inputs:  []*bc.TxInput{issuanceInp},
 		Outputs: []*bc.TxOutput{bc.NewTxOutput(assetID, 1, trueProg, nil)},
-		MinTime: bc.Millis(now),
+		MinTime: nowMS,
 		MaxTime: bc.Millis(now.Add(time.Hour)),
 	})
 	err = CheckTxWellFormed(tx)
@@ -95,7 +96,7 @@ func TestUniqueIssuance(t *testing.T) {
 	tx = bc.NewTx(bc.TxData{
 		Version: 1,
 		Inputs: []*bc.TxInput{
-			bc.NewSpendInput(tx.OutputID(0), nil, assetID, 1, trueProg, nil),
+			bc.NewSpendInput(nil, tx.Results[0].SourceID, assetID, 1, tx.Results[0].SourcePos, trueProg, tx.Results[0].RefDataHash, nil),
 			issuance2Inp,
 		},
 		Outputs: []*bc.TxOutput{
@@ -108,14 +109,7 @@ func TestUniqueIssuance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block := &bc.Block{
-		BlockHeader: bc.BlockHeader{
-			Version:     1,
-			TimestampMS: bc.Millis(now),
-		},
-	}
-
-	err = ConfirmTx(snapshot, initialBlockHash, block, tx)
+	err = ConfirmTx(snapshot, initialBlockHash, 1, nowMS, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +132,14 @@ func TestUniqueIssuance(t *testing.T) {
 		Outputs: []*bc.TxOutput{
 			bc.NewTxOutput(asset2ID, 1, trueProg, nil),
 		},
-		MinTime: bc.Millis(now),
+		MinTime: nowMS,
 		MaxTime: bc.Millis(now.Add(time.Hour)),
 	})
 	err = CheckTxWellFormed(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ConfirmTx(snapshot, initialBlockHash, block, tx)
+	err = ConfirmTx(snapshot, initialBlockHash, 1, nowMS, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +155,7 @@ func TestUniqueIssuance(t *testing.T) {
 		t.Errorf("expected input with non-empty nonce to be added to issuance memory")
 	}
 	// Adding it again should fail
-	if ConfirmTx(snapshot, initialBlockHash, block, tx) == nil {
+	if ConfirmTx(snapshot, initialBlockHash, 1, nowMS, tx) == nil {
 		t.Errorf("expected adding duplicate issuance tx to fail")
 	}
 }
@@ -174,6 +168,9 @@ func TestTxWellFormed(t *testing.T) {
 	aid2 := bc.AssetID([32]byte{2})
 
 	tx1 := bc.NewTx(bc.TxData{
+		Inputs: []*bc.TxInput{
+			bc.NewIssuanceInput([]byte{1}, 10, nil, initialBlockHash, issuanceProg, nil, nil),
+		},
 		Outputs: []*bc.TxOutput{
 			{
 				OutputCommitment: bc.OutputCommitment{
@@ -197,6 +194,8 @@ func TestTxWellFormed(t *testing.T) {
 			},
 		},
 	})
+	t.Log(tx1.Results[0].SourceID, tx1.Results[0].SourcePos, tx1.Results[0].RefDataHash)
+	t.Log(tx2.Results[0].SourceID, tx2.Results[0].SourcePos, tx2.Results[0].RefDataHash)
 
 	testCases := []struct {
 		suberr error
@@ -213,7 +212,7 @@ func TestTxWellFormed(t *testing.T) {
 			tx: bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid1, 1000, nil, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid1, 1000, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 999, nil, nil),
@@ -225,8 +224,8 @@ func TestTxWellFormed(t *testing.T) {
 			tx: bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid1, 500, nil, nil),
-					bc.NewSpendInput(tx2.OutputID(0), nil, aid2, 500, nil, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid1, 500, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
+					bc.NewSpendInput(nil, tx2.Results[0].SourceID, aid2, 500, tx2.Results[0].SourcePos, trueProg, tx2.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 500, nil, nil),
@@ -240,7 +239,7 @@ func TestTxWellFormed(t *testing.T) {
 				Version: 1,
 				Inputs: []*bc.TxInput{
 					bc.NewIssuanceInput(nil, 0, nil, initialBlockHash, issuanceProg, nil, nil),
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid2, 0, nil, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid2, 0, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 0, nil, nil),
@@ -252,7 +251,7 @@ func TestTxWellFormed(t *testing.T) {
 			tx: bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid1, 1000, trueProg, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid1, 1000, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 1000, nil, nil),
@@ -263,8 +262,8 @@ func TestTxWellFormed(t *testing.T) {
 			tx: bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid1, 500, trueProg, nil),
-					bc.NewSpendInput(tx2.OutputID(0), nil, aid2, 500, trueProg, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid1, 500, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
+					bc.NewSpendInput(nil, tx2.Results[0].SourceID, aid2, 500, tx2.Results[0].SourcePos, trueProg, tx2.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 500, nil, nil),
@@ -278,8 +277,8 @@ func TestTxWellFormed(t *testing.T) {
 			tx: bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid1, 500, trueProg, nil),
-					bc.NewSpendInput(tx2.OutputID(0), nil, aid1, 500, trueProg, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid1, 500, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
+					bc.NewSpendInput(nil, tx2.Results[0].SourceID, aid1, 500, tx2.Results[0].SourcePos, trueProg, tx2.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 1000, nil, nil),
@@ -293,7 +292,7 @@ func TestTxWellFormed(t *testing.T) {
 				MinTime: 2,
 				MaxTime: 1,
 				Inputs: []*bc.TxInput{
-					bc.NewSpendInput(tx1.OutputID(0), nil, aid1, 1000, nil, nil),
+					bc.NewSpendInput(nil, tx1.Results[0].SourceID, aid1, 1000, tx1.Results[0].SourcePos, trueProg, tx1.Results[0].RefDataHash, nil),
 				},
 				Outputs: []*bc.TxOutput{
 					bc.NewTxOutput(aid1, 1000, nil, nil),
@@ -307,7 +306,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -339,7 +338,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -371,7 +370,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 2,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -403,7 +402,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -435,7 +434,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -467,7 +466,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -499,7 +498,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -532,7 +531,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 2,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -565,7 +564,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -598,7 +597,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -631,7 +630,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -664,7 +663,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -696,7 +695,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: math.MaxInt64,
 								},
@@ -708,7 +707,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 1,
 								},
@@ -728,7 +727,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 10,
 								},
@@ -740,7 +739,7 @@ func TestTxWellFormed(t *testing.T) {
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{
+							SpendCommitment: bc.SpendCommitment{
 								AssetAmount: bc.AssetAmount{
 									Amount: 10,
 								},
@@ -786,7 +785,7 @@ func TestTxRangeErrs(t *testing.T) {
 				{
 					AssetVersion: 1,
 					TypedInput: &bc.SpendInput{
-						OutputCommitment: bc.OutputCommitment{
+						SpendCommitment: bc.SpendCommitment{
 							AssetAmount: bc.AssetAmount{
 								Amount: math.MaxInt64 + 1,
 							},
@@ -802,7 +801,7 @@ func TestTxRangeErrs(t *testing.T) {
 				{
 					AssetVersion: 1,
 					TypedInput: &bc.SpendInput{
-						OutputCommitment: bc.OutputCommitment{
+						SpendCommitment: bc.SpendCommitment{
 							AssetAmount: bc.AssetAmount{
 								Amount: 10,
 							},
@@ -828,7 +827,7 @@ func TestTxRangeErrs(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		_, err := bc.TxHashesFunc(c)
+		_, err := bc.ComputeTxHashes(c)
 		switch errors.Root(err) {
 		case nil:
 			t.Errorf("got no error, want blockchain.ErrRange")
@@ -925,13 +924,7 @@ func TestValidateInvalidIssuances(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		block := &bc.Block{
-			BlockHeader: bc.BlockHeader{
-				Version:     1,
-				TimestampMS: c.timestamp,
-			},
-		}
-		err := ConfirmTx(state.Empty(), initialBlockHash, block, &c.tx)
+		err := ConfirmTx(state.Empty(), initialBlockHash, 1, c.timestamp, &c.tx)
 		if !c.ok && errors.Root(err) != ErrBadTx {
 			t.Errorf("test %d: got = %s, want ErrBadTx", i, err)
 			continue
@@ -964,33 +957,28 @@ func TestConfirmTx(t *testing.T) {
 	})
 
 	outid1 := tx.OutputID(0)
+	outres := tx.Results[0]
 
 	snapshot := state.Empty()
-	err := snapshot.Tree.Insert(state.OutputTreeItem(outid1))
+	err := snapshot.Tree.Insert(outid1[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	cases := []struct {
-		blockheader *bc.BlockHeader
-		tx          *bc.TxData
-		suberr      error
-		doApply     bool
+		blockTimestampMS uint64
+		tx               *bc.TxData
+		suberr           error
+		doApply          bool
 	}{
 		{
-			blockheader: &bc.BlockHeader{
-				Version: 1,
-			},
 			tx: &bc.TxData{
 				Version: 2,
 			},
 			suberr: errTxVersion,
 		},
 		{
-			blockheader: &bc.BlockHeader{
-				Version:     1,
-				TimestampMS: 10,
-			},
+			blockTimestampMS: 10,
 			tx: &bc.TxData{
 				Version: 1,
 				MinTime: 11,
@@ -998,10 +986,7 @@ func TestConfirmTx(t *testing.T) {
 			suberr: errNotYet,
 		},
 		{
-			blockheader: &bc.BlockHeader{
-				Version:     1,
-				TimestampMS: 10,
-			},
+			blockTimestampMS: 10,
 			tx: &bc.TxData{
 				Version: 1,
 				MaxTime: 9,
@@ -1009,9 +994,6 @@ func TestConfirmTx(t *testing.T) {
 			suberr: errTooLate,
 		},
 		{
-			blockheader: &bc.BlockHeader{
-				Version: 1,
-			},
 			tx: &bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
@@ -1029,9 +1011,6 @@ func TestConfirmTx(t *testing.T) {
 			suberr: errWrongBlockchain,
 		},
 		{
-			blockheader: &bc.BlockHeader{
-				Version: 1,
-			},
 			tx: &bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
@@ -1046,16 +1025,13 @@ func TestConfirmTx(t *testing.T) {
 			suberr: errTimelessIssuance,
 		},
 		{
-			blockheader: &bc.BlockHeader{
-				Version: 1,
-			},
 			tx: &bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							OutputCommitment: bc.OutputCommitment{},
+							SpendCommitment: bc.SpendCommitment{},
 						},
 					},
 				},
@@ -1063,17 +1039,20 @@ func TestConfirmTx(t *testing.T) {
 			suberr: errInvalidOutput,
 		},
 		{
-			blockheader: &bc.BlockHeader{
-				Version: 1,
-			},
 			tx: &bc.TxData{
 				Version: 1,
 				Inputs: []*bc.TxInput{
 					{
 						AssetVersion: 1,
 						TypedInput: &bc.SpendInput{
-							SpentOutputID:    outid1,
-							OutputCommitment: out1,
+							SpendCommitment: bc.SpendCommitment{
+								AssetAmount:    out1.AssetAmount,
+								VMVersion:      out1.VMVersion,
+								ControlProgram: out1.ControlProgram,
+								SourceID:       outres.SourceID,
+								SourcePosition: outres.SourcePos,
+								RefDataHash:    outres.RefDataHash,
+							},
 						},
 					},
 				},
@@ -1083,11 +1062,8 @@ func TestConfirmTx(t *testing.T) {
 	}
 	for i, c := range cases {
 		var initialBlockHash bc.Hash
-		block := &bc.Block{
-			BlockHeader: *c.blockheader,
-		}
 		tx := bc.NewTx(*c.tx)
-		err := ConfirmTx(snapshot, initialBlockHash, block, tx)
+		err := ConfirmTx(snapshot, initialBlockHash, 1, c.blockTimestampMS, tx)
 		if c.suberr == nil {
 			if err != nil {
 				t.Errorf("case %d: got error %s, want no error", i, err)
@@ -1101,7 +1077,7 @@ func TestConfirmTx(t *testing.T) {
 				}
 				// Apply succeeded, now try to confirm again - it should fail
 				// with "invalid output."
-				err = ConfirmTx(snapshot, initialBlockHash, block, tx)
+				err = ConfirmTx(snapshot, initialBlockHash, 1, c.blockTimestampMS, tx)
 				if err == nil {
 					t.Errorf("case %d: confirm and apply succeeded, second confirm succeeded unexpectedly", i)
 					continue

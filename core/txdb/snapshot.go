@@ -25,13 +25,13 @@ func DecodeSnapshot(data []byte) (*state.Snapshot, error) {
 
 	tree := new(patricia.Tree)
 	for _, node := range storedSnapshot.Nodes {
-		err = tree.Insert(node.Key, node.Key)
+		err = tree.Insert(node.Key)
 		if err != nil {
 			return nil, errors.Wrap(err, "reconstructing state tree")
 		}
 	}
 
-	issuances := make(state.PriorIssuances, len(storedSnapshot.Issuances))
+	issuances := make(map[bc.Hash]uint64, len(storedSnapshot.Issuances))
 	for _, issuance := range storedSnapshot.Issuances {
 		var hash bc.Hash
 		copy(hash[:], issuance.Hash)

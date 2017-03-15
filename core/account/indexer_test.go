@@ -16,7 +16,7 @@ func TestLoadAccountInfo(t *testing.T) {
 	ctx := context.Background()
 
 	acc := m.createTestAccount(ctx, t, "", nil)
-	acp := m.createTestControlProgram(ctx, t, acc.ID)
+	acp := m.createTestControlProgram(ctx, t, acc.ID).controlProgram
 
 	to1 := bc.NewTxOutput(bc.AssetID{}, 0, acp, nil)
 	to2 := bc.NewTxOutput(bc.AssetID{}, 0, []byte("notfound"), nil)
@@ -45,7 +45,7 @@ func TestDeleteUTXOs(t *testing.T) {
 	ctx := context.Background()
 
 	assetID := bc.AssetID{}
-	acp := m.createTestControlProgram(ctx, t, "")
+	acp := m.createTestControlProgram(ctx, t, "").controlProgram
 	tx := bc.NewTx(bc.TxData{
 		Outputs: []*bc.TxOutput{
 			bc.NewTxOutput(assetID, 1, acp, nil),
@@ -57,15 +57,23 @@ func TestDeleteUTXOs(t *testing.T) {
 	if err != nil {
 		testutil.FatalErr(t, err)
 	}
+	err = m.deleteSpentOutputs(ctx, block1)
+	if err != nil {
+		testutil.FatalErr(t, err)
+	}
 
 	block2 := &bc.Block{Transactions: []*bc.Tx{
 		bc.NewTx(bc.TxData{
 			Inputs: []*bc.TxInput{
-				bc.NewSpendInput(tx.OutputID(0), nil, assetID, 1, nil, nil),
+				bc.NewSpendInput(nil, tx.Results[0].SourceID, assetID, 1, tx.Results[0].SourcePos, acp, tx.Results[0].RefDataHash, nil),
 			},
 		}),
 	}}
 	err = m.indexAccountUTXOs(ctx, block2)
+	if err != nil {
+		testutil.FatalErr(t, err)
+	}
+	err = m.deleteSpentOutputs(ctx, block2)
 	if err != nil {
 		testutil.FatalErr(t, err)
 	}

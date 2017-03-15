@@ -3,6 +3,7 @@
   font-weight: normal;
   margin-top: $gutter-size;
   margin-bottom: $gutter-size;
+  text-align: center;
 }
 
 .choices {
@@ -49,6 +50,16 @@
     background-color: $background-emphasis-color;
   }
 
+  &.disabled {
+    cursor: default;
+    background-color: $background-emphasis-color;
+    opacity: 0.75;
+
+    .choice_title {
+      color: $text-light-color;
+    }
+  }
+
   p {
     line-height: 1.4;
   }
@@ -70,15 +81,15 @@
 }
 
 .new {
-  background-image: url('assets/images/config/new.png')
+  background-image: url('images/config/new.png')
 }
 
 .join {
-  background-image: url('assets/images/config/join.png')
+  background-image: url('images/config/join.png')
 }
 
 .testnet {
-  background-image: url('assets/images/config/testnet.png')
+  background-image: url('images/config/testnet.png')
 }
 
 input[type=radio]:checked ~ .choice {
@@ -91,15 +102,15 @@ input[type=radio]:checked ~ .choice {
   }
 
   &.new {
-    background-image: url('assets/images/config/new-active.png')
+    background-image: url('images/config/new-active.png')
   }
 
   &.join {
-    background-image: url('assets/images/config/join-active.png')
+    background-image: url('images/config/join-active.png')
   }
 
   &.testnet {
-    background-image: url('assets/images/config/testnet-active.png')
+    background-image: url('images/config/testnet-active.png')
   }
 
 

@@ -34,4 +34,27 @@ var migrations = []migration{
 			ADD COLUMN spent_output_id bytea NOT NULL,
 			ADD COLUMN spent_output jsonb;
 	`},
+	{Name: `2017-02-28.0.core.remove-outpoints.sql`, SQL: `
+		ALTER TABLE annotated_inputs DROP COLUMN spent_output;
+		ALTER TABLE account_utxos DROP CONSTRAINT account_utxos_pkey;
+		ALTER TABLE account_utxos
+			DROP COLUMN tx_hash,
+			DROP COLUMN index;
+		ALTER TABLE account_utxos ADD PRIMARY KEY (output_id);
+	`},
+	{Name: `2017-03-02.0.core.add-output-source-info.sql`, SQL: `
+		ALTER TABLE account_utxos
+			ADD COLUMN source_id bytea NOT NULL,
+			ADD COLUMN source_pos bigint NOT NULL,
+			ADD COLUMN ref_data_hash bytea NOT NULL;
+	`},
+	{Name: `2017-03-09.0.core.account-utxos-change.sql`, SQL: `
+		BEGIN;
+		ALTER TABLE account_utxos ADD COLUMN change bool;
+		UPDATE account_utxos AS u SET change = acp.change
+			FROM account_control_programs AS acp
+			WHERE acp.control_program = u.control_program;
+		ALTER TABLE account_utxos ALTER COLUMN change SET NOT NULL;
+		COMMIT;
+	`},
 }

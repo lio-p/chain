@@ -47,12 +47,6 @@ func (c *Chain) GenerateBlock(ctx context.Context, prev *bc.Block, snapshot *sta
 		return nil, nil, fmt.Errorf("timestamp %d is earlier than prevblock timestamp %d", timestampMS, prev.TimestampMS)
 	}
 
-	// Topologically sort the transactions, if needed.
-	if !isTopSorted(txs) {
-		log.Messagef(ctx, "set of %d txs not in topo order; sorting", len(txs))
-		txs = topSort(txs)
-	}
-
 	// Make a copy of the state that we can apply our changes to.
 	result = state.Copy(snapshot)
 	result.PruneIssuances(timestampMS)
@@ -80,7 +74,7 @@ func (c *Chain) GenerateBlock(ctx context.Context, prev *bc.Block, snapshot *sta
 			continue
 		}
 
-		if validation.ConfirmTx(result, c.InitialBlockHash, b, tx) == nil {
+		if validation.ConfirmTx(result, c.InitialBlockHash, bc.NewBlockVersion, timestampMS, tx) == nil {
 			err = validation.ApplyTx(result, tx)
 			if err != nil {
 				return nil, nil, err
@@ -158,7 +152,7 @@ func (c *Chain) queueSnapshot(ctx context.Context, height uint64, timestamp time
 		c.lastQueuedSnapshot = timestamp
 	default:
 		// Skip it; saving snapshots is taking longer than the snapshotting period.
-		log.Messagef(ctx, "snapshot storage is taking too long; last queued at %s",
+		log.Printf(ctx, "snapshot storage is taking too long; last queued at %s",
 			c.lastQueuedSnapshot)
 	}
 }

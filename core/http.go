@@ -11,6 +11,11 @@ import (
 	"chain/net/http/reqid"
 )
 
+func init() {
+	log.SkipFunc("chain/core.logHTTPError")
+	log.SkipFunc("chain/core.WriteHTTPError")
+}
+
 // errBadReqHeader indicates the user supplied a malformed request header,
 // possibly including a datatype that doesn't match what we expected.
 var errBadReqHeader = errors.New("bad request header")
@@ -49,7 +54,7 @@ func logHTTPError(ctx context.Context, err error) {
 	if info.HTTPStatus == 500 {
 		keyvals = append(keyvals, log.KeyStack, errors.Stack(err))
 	}
-	log.Write(ctx, keyvals...)
+	log.Printkv(ctx, keyvals...)
 }
 
 func alwaysError(err error) http.Handler {

@@ -3,18 +3,16 @@ package com.chain.http;
 import com.chain.exception.*;
 import com.chain.common.*;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.lang.reflect.Type;
 import java.net.*;
-import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.Random;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.List;
-import java.util.Objects;
 
 import com.google.gson.Gson;
 
@@ -26,6 +24,8 @@ import com.squareup.okhttp.OkHttpClient;
 import com.squareup.okhttp.Request;
 import com.squareup.okhttp.RequestBody;
 import com.squareup.okhttp.Response;
+
+import javax.net.ssl.*;
 
 /**
  * The Client object contains all information necessary to
@@ -318,7 +318,7 @@ public class Client {
       int idx = this.urlIndex.get();
       URL endpointURL;
       try {
-        URI u = new URI(this.urls.get(idx).toString() + "/" + path);
+        URI u = new URI(this.urls.get(idx % this.urls.size()).toString() + "/" + path);
         u = u.normalize();
         endpointURL = new URL(u.toString());
       } catch (MalformedURLException ex) {
@@ -353,10 +353,10 @@ public class Client {
         // This URL's process might be unhealthy; move to the next.
         this.nextURL(idx);
 
-        // The OkHttp library already performs retries for most
-        // I/O-related errors. We can add retries here too if this
-        // becomes a problem.
-        throw new HTTPException(ex.getMessage());
+        // The OkHttp library already performs retries for some
+        // I/O-related errors, but we've hit this case in a leader
+        // failover, so do our own retries too.
+        exception = new HTTPException(ex.getMessage());
       } catch (ConnectivityException ex) {
         // This URL's process might be unhealthy; move to the next.
         this.nextURL(idx);
@@ -364,14 +364,14 @@ public class Client {
         // ConnectivityExceptions are always retriable.
         exception = ex;
       } catch (APIException ex) {
-        // This URL's process might be unhealthy; move to the next.
-        this.nextURL(idx);
-
         // Check if this error is retriable (either it's a status code that's
         // always retriable or the error is explicitly marked as temporary.
         if (!isRetriableStatusCode(ex.statusCode) && !ex.temporary) {
           throw ex;
         }
+
+        // This URL's process might be unhealthy; move to the next.
+        this.nextURL(idx);
         exception = ex;
       }
     }
@@ -380,6 +380,11 @@ public class Client {
 
   private OkHttpClient buildHttpClient(Builder builder) {
     OkHttpClient httpClient = new OkHttpClient();
+
+    if (builder.sslSocketFactory != null) {
+      httpClient.setSslSocketFactory(builder.sslSocketFactory);
+    }
+
     httpClient.setFollowRedirects(false);
     httpClient.setReadTimeout(builder.readTimeout, builder.readTimeoutUnit);
     httpClient.setWriteTimeout(builder.writeTimeout, builder.writeTimeoutUnit);
@@ -393,6 +398,9 @@ public class Client {
     if (builder.cp != null) {
       httpClient.setCertificatePinner(builder.cp);
     }
+    if (builder.logger != null) {
+      httpClient.interceptors().add(new LoggingInterceptor(builder.logger, builder.logLevel));
+    }
 
     return httpClient;
   }
@@ -400,15 +408,17 @@ public class Client {
   private static final Random randomGenerator = new Random();
   private static final int MAX_RETRIES = 10;
   private static final int RETRY_BASE_DELAY_MILLIS = 40;
-  private static final int RETRY_MAX_DELAY_MILLIS = 4000;
+
+  // the max amount of time cored leader election could take
+  private static final int RETRY_MAX_DELAY_MILLIS = 15000;
 
   private static int retryDelayMillis(int retryAttempt) {
     // Calculate the max delay as base * 2 ^ (retryAttempt - 1).
     int max = RETRY_BASE_DELAY_MILLIS * (1 << (retryAttempt - 1));
     max = Math.min(max, RETRY_MAX_DELAY_MILLIS);
 
-    // To incorporate jitter, use a pseudorandom delay between [1, max] millis.
-    return randomGenerator.nextInt(max) + 1;
+    // To incorporate jitter, use a pseudo random delay between [max/2, max] millis.
+    return randomGenerator.nextInt(max / 2) + max / 2 + 1;
   }
 
   private static final int[] RETRIABLE_STATUS_CODES = {
@@ -463,7 +473,7 @@ public class Client {
 
     // A request to the url at failedIndex just failed. Move to the next
     // URL in the list.
-    int nextIndex = (failedIndex + 1) % this.urls.size();
+    int nextIndex = failedIndex + 1;
     this.urlIndex.compareAndSet(failedIndex, nextIndex);
   }
 
@@ -519,6 +529,7 @@ public class Client {
     private List<URL> urls;
     private String accessToken;
     private CertificatePinner cp;
+    private SSLSocketFactory sslSocketFactory;
     private long connectTimeout;
     private TimeUnit connectTimeoutUnit;
     private long readTimeout;
@@ -527,6 +538,8 @@ public class Client {
     private TimeUnit writeTimeoutUnit;
     private Proxy proxy;
     private ConnectionPool pool;
+    private OutputStream logger;
+    private LoggingInterceptor.Level logLevel = LoggingInterceptor.Level.ERRORS;
 
     public Builder() {
       this.urls = new ArrayList<URL>();
@@ -596,6 +609,59 @@ public class Client {
     }
 
     /**
+     * Trusts the given CA certs, and no others. Use this if you are running
+     * your own CA, or are using a self-signed server certificate.
+     *
+     * @param path The path of a file containing certificates to trust, in PEM
+     *   format.
+     */
+    public Builder setTrustedCerts(String path)
+        throws GeneralSecurityException, IOException, IllegalArgumentException,
+            IllegalArgumentException {
+      // Extract certs from PEM-encoded input.
+      InputStream pemStream = new FileInputStream(path);
+      CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+      Collection<? extends Certificate> certificates =
+          certificateFactory.generateCertificates(pemStream);
+      if (certificates.isEmpty()) {
+        throw new IllegalArgumentException("expected non-empty set of trusted certificates");
+      }
+
+      // Create empty key store.
+      KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+      char[] password =
+          "password".toCharArray(); // The password is unimportant as long as it used consistently.
+      keyStore.load(null, password);
+
+      // Load certs into key store.
+      int index = 0;
+      for (Certificate certificate : certificates) {
+        String certificateAlias = Integer.toString(index++);
+        keyStore.setCertificateEntry(certificateAlias, certificate);
+      }
+
+      // Use key store to build an X509 trust manager.
+      KeyManagerFactory keyManagerFactory =
+          KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+      keyManagerFactory.init(keyStore, password);
+      TrustManagerFactory trustManagerFactory =
+          TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+      trustManagerFactory.init(keyStore);
+      TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
+      if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+        throw new IllegalStateException(
+            "Unexpected default trust managers:" + Arrays.toString(trustManagers));
+      }
+
+      // Finally, configure the socket factory.
+      SSLContext sslContext = SSLContext.getInstance("TLS");
+      sslContext.init(null, trustManagers, null);
+      sslSocketFactory = sslContext.getSocketFactory();
+
+      return this;
+    }
+
+    /**
      * Sets the certificate pinner for the client
      * @param provider certificate provider
      * @param subjPubKeyInfoHash public key hash
@@ -655,6 +721,24 @@ public class Client {
      */
     public Builder setConnectionPool(int maxIdle, long timeout, TimeUnit unit) {
       this.pool = new ConnectionPool(maxIdle, unit.toMillis(timeout));
+      return this;
+    }
+
+    /**
+     * Sets the request logger.
+     * @param logger the output stream to log the requests to
+     */
+    public Builder setLogger(OutputStream logger) {
+      this.logger = logger;
+      return this;
+    }
+
+    /**
+     * Sets the level of the request logger.
+     * @param level all, errors or none
+     */
+    public Builder setLogLevel(LoggingInterceptor.Level level) {
+      this.logLevel = level;
       return this;
     }
 

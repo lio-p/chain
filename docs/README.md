@@ -41,13 +41,13 @@ Log into `aws` with the command:
 $ aws configure
 ```
 
-#### The `docs-release` branch
+#### Checking out the right version of docs
 
 Before uploading documentation, make sure your local state reflects the correct documentation. The `main` branch is generally not safe for this purpose, since it may contain documentation updates that reflect changes that have yet to make it into an official relase.
 
-The state of production documentation is tracked in the `docs-release` branch. This branch that reflects the last known safe version of the documentation. Typically, it will contain the contents of `main`, **minus** updates to the `docs` and `sdk` directories that reflect unreleased updates.
+The state of production documentation is tracked in the `<major>.<minor>-stable` family of release branches. Each such branch reflects the last known safe version of the documentation for the corresponding major/minor version pair.
 
-Since this contents of `docs-release` are assembled ad hoc, the history of this branch is relatively unimportant. It's fine to use force-pushes to synchronize the branch with `main`. Our current convention is to find a stable baseline commit on `main`, and then add cherry-picked commits that refer to commits in `main` that contain releasable updates to the `docs` and `sdk` directories.
+For the time being, only the most recent version of the documentation is published online. Please make sure you are on the most recent release branch before uploading.
 
 #### Uploading the docs
 
@@ -55,7 +55,7 @@ Staging:
 
 ```
 cd $CHAIN
-git checkout docs-release
+git checkout <major>.<minor>-stable
 ./bin/upload-docs
 ```
 
@@ -63,6 +63,6 @@ Production:
 
 ```
 cd $CHAIN
-git checkout docs-release
+git checkout <major>.<minor>-stable
 ./bin/upload-docs prod
 ```

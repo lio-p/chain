@@ -2,8 +2,8 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 9.5.5
--- Dumped by pg_dump version 9.5.5
+-- Dumped from database version 9.5.6
+-- Dumped by pg_dump version 9.5.6
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -188,15 +188,17 @@ CREATE TABLE account_control_programs (
 --
 
 CREATE TABLE account_utxos (
-    tx_hash bytea NOT NULL,
-    index integer NOT NULL,
     asset_id bytea NOT NULL,
     amount bigint NOT NULL,
     account_id text NOT NULL,
     control_program_index bigint NOT NULL,
     control_program bytea NOT NULL,
     confirmed_in bigint NOT NULL,
-    output_id bytea NOT NULL
+    output_id bytea NOT NULL,
+    source_id bytea NOT NULL,
+    source_pos bigint NOT NULL,
+    ref_data_hash bytea NOT NULL,
+    change boolean NOT NULL
 );
 
 
@@ -261,8 +263,7 @@ CREATE TABLE annotated_inputs (
     issuance_program bytea NOT NULL,
     reference_data jsonb NOT NULL,
     local boolean NOT NULL,
-    spent_output_id bytea NOT NULL,
-    spent_output jsonb
+    spent_output_id bytea NOT NULL
 );
 
 
@@ -599,7 +600,7 @@ ALTER TABLE ONLY account_utxos
 --
 
 ALTER TABLE ONLY account_utxos
-    ADD CONSTRAINT account_utxos_pkey PRIMARY KEY (tx_hash, index);
+    ADD CONSTRAINT account_utxos_pkey PRIMARY KEY (output_id);
 
 
 --
@@ -897,3 +898,6 @@ CREATE INDEX signers_type_id_idx ON signers USING btree (type, id);
 insert into migrations (filename, hash) values ('2017-02-03.0.core.schema-snapshot.sql', '1d55668affe0be9f3c19ead9d67bc75cfd37ec430651434d0f2af2706d9f08cd');
 insert into migrations (filename, hash) values ('2017-02-07.0.query.non-null-alias.sql', '17028a0bdbc95911e299dc65fe641184e54c87a0d07b3c576d62d023b9a8defc');
 insert into migrations (filename, hash) values ('2017-02-16.0.query.spent-output.sql', '7cd52095b6f202d7a25ffe666b7b7d60e7700d314a7559b911e236b72661a738');
+insert into migrations (filename, hash) values ('2017-02-28.0.core.remove-outpoints.sql', '067638e2a826eac70d548f2d6bb234660f3200064072baf42db741456ecf8deb');
+insert into migrations (filename, hash) values ('2017-03-02.0.core.add-output-source-info.sql', 'f44c7cfbff346f6f797d497910c0a76f2a7600ca8b5be4fe4e4a04feaf32e0df');
+insert into migrations (filename, hash) values ('2017-03-09.0.core.account-utxos-change.sql', 'a99e0e41be3da126a8c47151454098669334bf7e30de6cd539ba535add4e85d1');

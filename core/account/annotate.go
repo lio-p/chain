@@ -9,103 +9,79 @@ import (
 
 	"chain/core/query"
 	"chain/database/pg"
+	"chain/errors"
+	"chain/protocol/bc"
 )
+
+var empty = json.RawMessage(`{}`)
 
 // AnnotateTxs adds account data to transactions
 func (m *Manager) AnnotateTxs(ctx context.Context, txs []*query.AnnotatedTx) error {
-	inputs := make(map[string][]*query.AnnotatedInput)
-	outputs := make(map[string][]*query.AnnotatedOutput)
-	controlProgramSet := make(map[string]bool)
-	var controlPrograms [][]byte
+	var (
+		outputIDs [][]byte
+		inputs    = make(map[bc.Hash]*query.AnnotatedInput)
+		outputs   = make(map[bc.Hash]*query.AnnotatedOutput)
+	)
 
 	for _, tx := range txs {
 		for _, in := range tx.Inputs {
-			if len(in.ControlProgram) == 0 {
+			if in.SpentOutputID == nil {
 				continue
 			}
-			inputs[string(in.ControlProgram)] = append(inputs[string(in.ControlProgram)], in)
-			if controlProgramSet[string(in.ControlProgram)] {
-				continue
-			}
-			controlPrograms = append(controlPrograms, in.ControlProgram)
-			controlProgramSet[string(in.ControlProgram)] = true
+
+			inputs[*in.SpentOutputID] = in
+			outputIDs = append(outputIDs, in.SpentOutputID[:])
 		}
 		for _, out := range tx.Outputs {
 			if out.Type == "retire" {
 				continue
 			}
-			outputs[string(out.ControlProgram)] = append(outputs[string(out.ControlProgram)], out)
-			if controlProgramSet[string(out.ControlProgram)] {
-				continue
-			}
-			controlPrograms = append(controlPrograms, out.ControlProgram)
-			controlProgramSet[string(out.ControlProgram)] = true
+
+			outputs[out.OutputID] = out
+			outputIDs = append(outputIDs, out.OutputID[:])
 		}
 	}
 
+	// Look up all of the spent and created outputs. If any of them are
+	// account UTXOs add the account annotations to the inputs and outputs.
 	const q = `
-		SELECT signer_id, control_program, change, alias, tags
-		FROM account_control_programs
-		LEFT JOIN signers ON signers.id=account_control_programs.signer_id
-		LEFT JOIN accounts ON accounts.account_id=signers.id
-		WHERE control_program=ANY($1::bytea[])
+		SELECT o.output_id, o.account_id, a.alias, a.tags, o.change
+		FROM account_utxos o
+		LEFT JOIN accounts a ON o.account_id = a.account_id
+		WHERE o.output_id = ANY($1::bytea[])
 	`
-	var (
-		ids         []string
-		programs    [][]byte
-		changeFlags []bool
-		aliases     []sql.NullString
-		tags        []*json.RawMessage
-	)
-	err := pg.ForQueryRows(ctx, m.db, q, pq.ByteaArray(controlPrograms), func(accountID string, program []byte, change bool, alias sql.NullString, accountTags []byte) {
-		ids = append(ids, accountID)
-		programs = append(programs, program)
-		changeFlags = append(changeFlags, change)
-		aliases = append(aliases, alias)
-		if len(accountTags) > 0 {
-			tags = append(tags, (*json.RawMessage)(&accountTags))
-		} else {
-			tags = append(tags, nil)
-		}
-	})
-	if err != nil {
-		return err
-	}
-
-	empty := json.RawMessage(`{}`)
-	for i := range ids {
-		inps := inputs[string(programs[i])]
-		for _, inp := range inps {
-			inp.AccountID = ids[i]
-			if aliases[i].Valid {
-				inp.AccountAlias = aliases[i].String
-			}
-			if tags[i] != nil {
-				inp.AccountTags = tags[i]
-			} else {
-				inp.AccountTags = &empty
-			}
-		}
-
-		outs := outputs[string(programs[i])]
-		for _, out := range outs {
-			out.AccountID = ids[i]
-			if aliases[i].Valid {
-				out.AccountAlias = aliases[i].String
-			}
-			if tags[i] != nil {
-				out.AccountTags = tags[i]
-			} else {
-				out.AccountTags = &empty
+	err := pg.ForQueryRows(ctx, m.db, q, pq.ByteaArray(outputIDs),
+		func(outputID bc.Hash, accID string, alias sql.NullString, accountTags []byte, change bool) {
+			spendingInput, ok := inputs[outputID]
+			if ok {
+				spendingInput.AccountID = accID
+				if alias.Valid {
+					spendingInput.AccountAlias = alias.String
+				}
+				if len(accountTags) > 0 {
+					spendingInput.AccountTags = (*json.RawMessage)(&accountTags)
+				} else {
+					spendingInput.AccountTags = &empty
+				}
 			}
 
-			if changeFlags[i] {
-				out.Purpose = "change"
-			} else {
-				out.Purpose = "receive"
+			out, ok := outputs[outputID]
+			if ok {
+				out.AccountID = accID
+				if alias.Valid {
+					out.AccountAlias = alias.String
+				}
+				if len(accountTags) > 0 {
+					out.AccountTags = (*json.RawMessage)(&accountTags)
+				} else {
+					out.AccountTags = &empty
+				}
+				if change {
+					out.Purpose = "change"
+				} else {
+					out.Purpose = "receive"
+				}
 			}
-		}
-	}
-
-	return nil
+		})
+	return errors.Wrap(err, "annotating with account data")
 }

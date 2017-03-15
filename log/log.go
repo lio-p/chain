@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -16,15 +15,17 @@ import (
 	"time"
 
 	"chain/errors"
-	"chain/net/http/reqid"
 )
 
 const rfc3339NanoFixed = "2006-01-02T15:04:05.000000000Z07:00"
 
+// context key type
+type key int
+
 var (
 	logWriterMu sync.Mutex // protects the following
 	logWriter   io.Writer  = os.Stdout
-	prefix      []byte
+	procPrefix  []byte     // process-global prefix; see SetPrefix vs AddPrefixkv
 
 	// pairDelims contains a list of characters that may be used as delimeters
 	// between key-value pairs in a log entry. Keys and values will be quoted or
@@ -34,19 +35,19 @@ var (
 	// http://answers.splunk.com/answers/143368/default-delimiters-for-key-value-extraction.html
 	pairDelims      = " ,;|&\t\n\r"
 	illegalKeyChars = pairDelims + `="`
+
+	// context key for log line prefixes
+	prefixKey key = 0
 )
 
 // Conventional key names for log entries
 const (
-	KeyCaller   = "at"       // location of caller
-	KeyTime     = "t"        // time of call
-	KeyReqID    = "reqid"    // request ID from context
-	KeyCoreID   = "coreid"   // core ID from context
-	KeySubReqID = "subreqid" // potential sub-request ID from context
+	KeyCaller = "at" // location of caller
+	KeyTime   = "t"  // time of call
 
 	KeyMessage = "message" // produced by Message
 	KeyError   = "error"   // produced by Error
-	KeyStack   = "stack"   // used by Write to print stack on subsequent lines
+	KeyStack   = "stack"   // used by Printkv to print stack on subsequent lines
 
 	keyLogError = "log-error" // for errors produced by the log package itself
 )
@@ -60,13 +61,11 @@ func SetOutput(w io.Writer) {
 	logWriterMu.Unlock()
 }
 
-// SetPrefix sets the output prefix.
-func SetPrefix(keyval ...interface{}) {
+func appendPrefix(b []byte, keyval ...interface{}) []byte {
 	// Invariant: len(keyval) is always even.
 	if len(keyval)%2 != 0 {
 		panic(fmt.Sprintf("odd-length prefix args: %v", keyval))
 	}
-	var b []byte
 	for i := 0; i < len(keyval); i += 2 {
 		k := formatKey(keyval[i])
 		v := formatValue(keyval[i+1])
@@ -75,60 +74,61 @@ func SetPrefix(keyval ...interface{}) {
 		b = append(b, v...)
 		b = append(b, ' ')
 	}
+	return b
+}
+
+// SetPrefix sets the global output prefix.
+func SetPrefix(keyval ...interface{}) {
+	b := appendPrefix(nil, keyval...)
 	logWriterMu.Lock()
-	prefix = b
+	procPrefix = b
 	logWriterMu.Unlock()
 }
 
-// Write writes a structured log entry to stdout. Log fields are
+// AddPrefixkv appends keyval to any prefix stored in ctx,
+// and returns a new context with the longer prefix.
+func AddPrefixkv(ctx context.Context, keyval ...interface{}) context.Context {
+	p := appendPrefix(prefix(ctx), keyval...)
+	// Note: subsequent calls will append to p, so set cap(p) here.
+	// See TestAddPrefixkvAppendTwice.
+	p = p[0:len(p):len(p)]
+	return context.WithValue(ctx, prefixKey, p)
+}
+
+func prefix(ctx context.Context) []byte {
+	b, _ := ctx.Value(prefixKey).([]byte)
+	return b
+}
+
+// Printkv prints a structured log entry to stdout. Log fields are
 // specified as a variadic sequence of alternating keys and values.
 //
 // Duplicate keys will be preserved.
 //
-// Several fields are automatically added to the log entry: a timestamp, a
-// string indicating the file and line number of the caller, and a request ID
-// taken from the context.
+// Two fields are automatically added to the log entry: t=[time]
+// and at=[file:line] indicating the location of the caller.
+// Use SkipFunc to prevent helper functions from showing up in the
+// at=[file:line] field.
 //
-// As a special case, the auto-generated caller may be overridden by passing in
-// a new value for the KeyCaller key as the first key-value pair. The override
-// feature should be reserved for custom logging functions that wrap Write.
-//
-// Write will also print the stack trace, if any, on separate lines
+// Printkv will also print the stack trace, if any, on separate lines
 // following the message. The stack is obtained from the following,
 // in order of preference:
 //   - a KeyStack value with type []byte or []errors.StackFrame
 //   - a KeyError value with type error, using the result of errors.Stack
-func Write(ctx context.Context, keyvals ...interface{}) {
+func Printkv(ctx context.Context, keyvals ...interface{}) {
 	// Invariant: len(keyvals) is always even.
 	if len(keyvals)%2 != 0 {
 		keyvals = append(keyvals, "", keyLogError, "odd number of log params")
-	}
-
-	// The auto-generated caller value may be overwritten.
-	var vcaller string
-	if len(keyvals) >= 2 && keyvals[0] == KeyCaller {
-		vcaller = formatValue(keyvals[1])
-		keyvals = keyvals[2:]
-	} else {
-		vcaller = caller(1)
 	}
 
 	t := time.Now().UTC()
 
 	// Prepend the log entry with auto-generated fields.
 	out := fmt.Sprintf(
-		"%s=%s %s=%s %s=%s",
-		KeyReqID, formatValue(reqid.FromContext(ctx)),
-		KeyCaller, vcaller,
+		"%s=%s %s=%s",
+		KeyCaller, caller(),
 		KeyTime, formatValue(t.Format(rfc3339NanoFixed)),
 	)
-	if s := reqid.CoreIDFromContext(ctx); s != "" {
-		out += " " + KeyCoreID + "=" + formatValue(reqid.CoreIDFromContext(ctx))
-	}
-
-	if subreqid := reqid.FromSubContext(ctx); subreqid != reqid.Unknown {
-		out += " " + KeySubReqID + "=" + formatValue(subreqid)
-	}
 
 	var stack interface{}
 	for i := 0; i < len(keyvals); i += 2 {
@@ -147,16 +147,17 @@ func Write(ctx context.Context, keyvals ...interface{}) {
 	}
 
 	logWriterMu.Lock()
-	logWriter.Write(prefix)
+	logWriter.Write(procPrefix)
+	logWriter.Write(prefix(ctx))
 	logWriter.Write([]byte(out)) // ignore errors
 	logWriter.Write([]byte{'\n'})
 	writeRawStack(logWriter, stack)
 	logWriterMu.Unlock()
 }
 
-// Fatal is equivalent to Write() followed by a call to os.Exit(1).
-func Fatal(ctx context.Context, keyvals ...interface{}) {
-	Write(ctx, keyvals...)
+// Fatalkv is equivalent to Printkv() followed by a call to os.Exit(1).
+func Fatalkv(ctx context.Context, keyvals ...interface{}) {
+	Printkv(ctx, keyvals...)
 	os.Exit(1)
 }
 
@@ -185,13 +186,13 @@ func isStackVal(v interface{}) bool {
 	return false
 }
 
-// Messagef writes a log entry containing a message assigned to the
+// Printf prints a log entry containing a message assigned to the
 // "message" key. Arguments are handled as in fmt.Printf.
-func Messagef(ctx context.Context, format string, a ...interface{}) {
-	Write(ctx, KeyCaller, caller(1), KeyMessage, fmt.Sprintf(format, a...))
+func Printf(ctx context.Context, format string, a ...interface{}) {
+	Printkv(ctx, KeyMessage, fmt.Sprintf(format, a...))
 }
 
-// Error writes a log entry containing an error message assigned to the
+// Error prints a log entry containing an error message assigned to the
 // "error" key.
 // Optionally, an error message prefix can be included. Prefix arguments are
 // handled as in fmt.Print.
@@ -201,27 +202,7 @@ func Error(ctx context.Context, err error, a ...interface{}) {
 	} else if len(a) > 0 {
 		err = fmt.Errorf("%s: %s", fmt.Sprint(a...), err) // don't add a stack here
 	}
-	Write(ctx, KeyCaller, caller(1), KeyError, err)
-}
-
-// caller returns a string containing filename and line number of a
-// function invocation on the calling goroutine's stack.
-// The argument skip is the number of stack frames to ascend, where
-// 0 is the calling site of caller. If no stack information is not available,
-// "?:?" is returned.
-func caller(skip int) string {
-	_, file, nline, ok := runtime.Caller(skip + 1)
-
-	var line string
-	if ok {
-		file = filepath.Base(file)
-		line = strconv.Itoa(nline)
-	} else {
-		file = "?"
-		line = "?"
-	}
-
-	return file + ":" + line
+	Printkv(ctx, KeyError, err)
 }
 
 // formatKey ensures that the stringified key is valid for use in a
@@ -257,7 +238,7 @@ func RecoverAndLogError(ctx context.Context) {
 		const size = 64 << 10
 		buf := make([]byte, size)
 		buf = buf[:runtime.Stack(buf, false)]
-		Write(ctx,
+		Printkv(ctx,
 			KeyMessage, "panic",
 			KeyError, err,
 			KeyStack, buf,

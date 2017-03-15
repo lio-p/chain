@@ -61,16 +61,16 @@ func badTxErrf(err error, f string, args ...interface{}) error {
 // CheckTxWellFormed. This should have happened when the tx was added
 // to the pool.
 //
-// ConfirmTx must not mutate the snapshot or the block.
-func ConfirmTx(snapshot *state.Snapshot, initialBlockHash bc.Hash, block *bc.Block, tx *bc.Tx) error {
-	if tx.Version < 1 || tx.Version > block.Version {
-		return badTxErrf(errTxVersion, "unknown transaction version %d for block version %d", tx.Version, block.Version)
+// ConfirmTx must not mutate the snapshot.
+func ConfirmTx(snapshot *state.Snapshot, initialBlockHash bc.Hash, blockVersion, blockTimestampMS uint64, tx *bc.Tx) error {
+	if tx.Version < 1 || tx.Version > blockVersion {
+		return badTxErrf(errTxVersion, "unknown transaction version %d for block version %d", tx.Version, blockVersion)
 	}
 
-	if block.TimestampMS < tx.MinTime {
+	if blockTimestampMS < tx.MinTime {
 		return badTxErr(errNotYet)
 	}
-	if tx.MaxTime > 0 && block.TimestampMS > tx.MaxTime {
+	if tx.MaxTime > 0 && blockTimestampMS > tx.MaxTime {
 		return badTxErr(errTooLate)
 	}
 
@@ -88,7 +88,7 @@ func ConfirmTx(snapshot *state.Snapshot, initialBlockHash bc.Hash, block *bc.Blo
 			if tx.MinTime == 0 || tx.MaxTime == 0 {
 				return badTxErr(errTimelessIssuance)
 			}
-			if block.TimestampMS < tx.MinTime || block.TimestampMS > tx.MaxTime {
+			if blockTimestampMS < tx.MinTime || blockTimestampMS > tx.MaxTime {
 				return badTxErr(errIssuanceTime)
 			}
 			iHash, err := tx.IssuanceHash(i)
@@ -103,9 +103,14 @@ func ConfirmTx(snapshot *state.Snapshot, initialBlockHash bc.Hash, block *bc.Blo
 
 		// txin is a spend
 
+		spentOutputID, err := txin.SpentOutputID()
+		if err != nil {
+			return badTxErrf(errInvalidOutput, "could not compute output id for input %d", i)
+		}
+
 		// Lookup the prevout in the blockchain state tree.
-		if !snapshot.Tree.Contains(txin.SpentOutputID().Bytes()) {
-			return badTxErrf(errInvalidOutput, "output %s for input %d is invalid", txin.SpentOutputID().String(), i)
+		if !snapshot.Tree.Contains(spentOutputID.Bytes()) {
+			return badTxErrf(errInvalidOutput, "output %s for input %d is invalid", spentOutputID, i)
 		}
 	}
 	return nil
@@ -268,10 +273,11 @@ func ApplyTx(snapshot *state.Snapshot, tx *bc.Tx) error {
 			continue
 		}
 
-		si := in.TypedInput.(*bc.SpendInput)
-
 		// Remove the consumed output from the state tree.
-		uid := si.SpentOutputID
+		uid, err := in.SpentOutputID()
+		if err != nil {
+			return err
+		}
 		snapshot.Tree.Delete(uid.Bytes())
 	}
 
@@ -280,7 +286,8 @@ func ApplyTx(snapshot *state.Snapshot, tx *bc.Tx) error {
 			continue
 		}
 		// Insert new outputs into the state tree.
-		err := snapshot.Tree.Insert(state.OutputTreeItem(tx.OutputID(uint32(i))))
+		outputID := tx.OutputID(uint32(i))
+		err := snapshot.Tree.Insert(outputID[:])
 		if err != nil {
 			return err
 		}

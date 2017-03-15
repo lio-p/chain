@@ -177,11 +177,13 @@ func TestVerifyTxInput(t *testing.T) {
 		wantErr error
 	}{{
 		input: bc.NewSpendInput(
-			bc.OutputID{},
 			[][]byte{{2}, {3}},
+			bc.Hash{},
 			bc.AssetID{},
 			1,
+			0,
 			[]byte{byte(OP_ADD), byte(OP_5), byte(OP_NUMEQUAL)},
+			bc.Hash{},
 			nil,
 		),
 	}, {
@@ -207,7 +209,7 @@ func TestVerifyTxInput(t *testing.T) {
 	}, {
 		input: &bc.TxInput{
 			TypedInput: &bc.SpendInput{
-				OutputCommitment: bc.OutputCommitment{
+				SpendCommitment: bc.SpendCommitment{
 					VMVersion: 2,
 				},
 			},
@@ -224,9 +226,6 @@ func TestVerifyTxInput(t *testing.T) {
 			nil,
 		),
 		wantErr: ErrRunLimitExceeded,
-	}, {
-		input:   &bc.TxInput{},
-		wantErr: ErrUnsupportedTx,
 	}}
 
 	for i, c := range cases {
@@ -466,7 +465,7 @@ func TestVerifyTxInputQuickCheck(t *testing.T) {
 			}
 		}()
 		tx := bc.NewTx(bc.TxData{
-			Inputs: []*bc.TxInput{bc.NewSpendInput(bc.OutputID{}, witnesses, bc.AssetID{}, 10, program, nil)},
+			Inputs: []*bc.TxInput{bc.NewSpendInput(witnesses, bc.Hash{}, bc.AssetID{}, 10, 0, program, bc.Hash{}, nil)},
 		})
 		verifyTxInput(tx, 0)
 		return true

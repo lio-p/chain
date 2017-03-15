@@ -11,6 +11,31 @@ import (
 	"chain/testutil"
 )
 
+func TestReadWriteStateSnapshotIssuanceMemory(t *testing.T) {
+	dbtx := pgtest.NewTx(t)
+	ctx := context.Background()
+	snapshot := state.Empty()
+	snapshot.Issuances[bc.Hash{0x01}] = 10
+	snapshot.Issuances[bc.Hash{0x02}] = 10
+	snapshot.Issuances[bc.Hash{0x03}] = 45
+	err := storeStateSnapshot(ctx, dbtx, snapshot, 200)
+	if err != nil {
+		t.Fatalf("Error writing state snapshot to db: %s\n", err)
+	}
+	got, _, err := getStateSnapshot(ctx, dbtx)
+	if err != nil {
+		t.Fatalf("Error reading state snapshot from db: %s\n", err)
+	}
+	want := map[bc.Hash]uint64{
+		bc.Hash{0x01}: 10,
+		bc.Hash{0x02}: 10,
+		bc.Hash{0x03}: 45,
+	}
+	if !testutil.DeepEqual(got.Issuances, want) {
+		t.Errorf("storing and loading snapshot issuance memory, got %#v, want %#v", got.Issuances, want)
+	}
+}
+
 func TestReadWriteStateSnapshot(t *testing.T) {
 	dbtx := pgtest.NewTx(t)
 	ctx := context.Background()
@@ -59,7 +84,7 @@ func TestReadWriteStateSnapshot(t *testing.T) {
 		t.Logf("Applying changeset %d\n", i)
 
 		for _, insert := range changeset.inserts {
-			err := snapshot.Tree.Insert(insert[:], insert[:])
+			err := snapshot.Tree.Insert(insert[:])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +151,7 @@ func benchmarkStoreSnapshot(nodes, issuances int, b *testing.B) {
 			b.Fatal(err)
 		}
 
-		err = snapshot.Tree.Insert(h[:], h[:])
+		err = snapshot.Tree.Insert(h[:])
 		if err != nil {
 			b.Fatal(err)
 		}

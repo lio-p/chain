@@ -141,6 +141,7 @@ func land(req *landReq) {
 		Body      string
 		Merged    bool
 		Mergeable *bool
+		Base      struct{ Ref string }
 	}
 	err = doGithubReq("GET", "repos/"+*org+"/"+repo+"/pulls/"+pr, nil, &prState)
 	if err != nil {
@@ -167,7 +168,8 @@ func land(req *landReq) {
 		return
 	}
 
-	cmd := dirCmd(landdir, "git", "rebase", "origin/main")
+	// base branch e.g. origin/main, origin/chain-core-server-1.1.x
+	cmd := dirCmd(landdir, "git", "rebase", "origin/"+prState.Base.Ref)
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
 	if err != nil {
@@ -178,6 +180,17 @@ func land(req *landReq) {
 			req.userID,
 			req.userName,
 			req.ref,
+		)
+		return
+	}
+
+	err = commitRevIDs(landdir, prState.Base.Ref)
+	if err != nil {
+		sayf("<@%s|%s> failed to land %s: could not commit revision id: %s",
+			req.userID,
+			req.userName,
+			req.ref,
+			err,
 		)
 		return
 	}
@@ -240,6 +253,37 @@ func land(req *landReq) {
 	runIn(landdir, exec.Command("git", "push", "origin", ":"+req.ref))
 	fetch(landdir, "main", repo)
 	runIn(landdir, exec.Command("git", "branch", "-D", req.ref))
+}
+
+func commitRevIDs(landdir, baseBranch string) error {
+	revID, err := revID(landdir, baseBranch)
+	if err != nil {
+		return err
+	}
+
+	for name, tpl := range revIDLang {
+		var body bytes.Buffer
+		err = tpl.Execute(&body, revID)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(landdir, name)
+		err = ioutil.WriteFile(path, body.Bytes(), 0666)
+		if err != nil {
+			return err
+		}
+	}
+
+	if isClean(landdir) {
+		// Avoid adding empty commits here if the revid hasn't
+		// changed since the last rebase. This way we don't
+		// have to wait on CI to run, we can land immediately.
+		return nil
+	}
+
+	cmd := dirCmd(landdir, "git", "commit", "--allow-empty", "-m", "auto rev id", "generated")
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func writeNetrc() error {
@@ -366,4 +410,12 @@ func clone(dir, ref, repo string) {
 	if err := c.Run(); err != nil {
 		panic(fmt.Errorf("%s: %v", strings.Join(c.Args, " "), err))
 	}
+}
+
+func isClean(dir string) bool {
+	cmd := exec.Command("git", "diff-index", "--quiet", "HEAD")
+	cmd.Dir = dir
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	return err == nil
 }

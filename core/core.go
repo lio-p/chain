@@ -22,9 +22,8 @@ var (
 	errNoClientTokens    = errors.New("cannot enable client auth without client access tokens")
 )
 
-// reserved mockhsm key alias
 const (
-	networkRPCVersion = 1
+	networkRPCVersion = 3
 )
 
 func (a *API) reset(ctx context.Context, req struct {
@@ -45,6 +44,10 @@ func (a *API) info(ctx context.Context) (map[string]interface{}, error) {
 		// never configured
 		return map[string]interface{}{
 			"is_configured": false,
+			"is_production": config.Production,
+			"version":       config.Version,
+			"build_commit":  config.BuildCommit,
+			"build_date":    config.BuildDate,
 		}, nil
 	}
 	if leader.IsLeading() {
@@ -141,21 +144,21 @@ func closeConnOK(w http.ResponseWriter, req *http.Request) {
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		log.Messagef(req.Context(), "no hijacker")
+		log.Printf(req.Context(), "no hijacker")
 		return
 	}
 	conn, buf, err := hijacker.Hijack()
 	if err != nil {
-		log.Messagef(req.Context(), "could not hijack connection: %s\n", err)
+		log.Printf(req.Context(), "could not hijack connection: %s\n", err)
 		return
 	}
 	err = buf.Flush()
 	if err != nil {
-		log.Messagef(req.Context(), "could not flush connection buffer: %s\n", err)
+		log.Printf(req.Context(), "could not flush connection buffer: %s\n", err)
 	}
 	err = conn.Close()
 	if err != nil {
-		log.Messagef(req.Context(), "could not close connection: %s\n", err)
+		log.Printf(req.Context(), "could not close connection: %s\n", err)
 	}
 }
 

@@ -14,21 +14,25 @@ class Page {
   /**
    * Create a page object
    *
-   * @param  {Object} data  API response for a single page of data.
+   * @param  {Object} data API response for a single page of data.
    * @param  {Client} client Chain Client.
    * @param  {String} memberPath key-path pointing to module implementing the
    *                  desired `query` method.
    */
   constructor(data, client, memberPath) {
     /**
-     * Array of Chain Core objects.
+     * Array of Chain Core objects. Available types are documented in the
+     * {@link global global namespace}.
+     *
      * @type {Array}
      */
     this.items = []
 
     /**
-     * Object representing the query for the immediate next page of results.
-     * @type {Query}
+     * Object representing the query for the immediate next page of results. Can
+     * be passed without modification to the `query` method that generated the
+     * Page object containing it. 
+     * @type {Object}
      */
     this.next = {}
 

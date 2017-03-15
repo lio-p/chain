@@ -18,7 +18,13 @@ import (
 )
 
 func CreatePins(ctx context.Context, t testing.TB, s *pin.Store) {
-	pins := []string{account.PinName, asset.PinName, query.TxPinName}
+	pins := []string{
+		account.PinName,
+		account.ExpirePinName,
+		account.DeleteSpentsPinName,
+		asset.PinName,
+		query.TxPinName,
+	}
 	for _, p := range pins {
 		err := s.CreatePin(ctx, p, 0)
 		if err != nil {
@@ -45,7 +51,7 @@ func CreateAsset(ctx context.Context, t testing.TB, assets *asset.Registry, def 
 	return asset.AssetID
 }
 
-func IssueAssets(ctx context.Context, t testing.TB, c *protocol.Chain, s txbuilder.Submitter, assets *asset.Registry, accounts *account.Manager, assetID bc.AssetID, amount uint64, accountID string) (*bc.TxOutput, bc.OutputID) {
+func IssueAssets(ctx context.Context, t testing.TB, c *protocol.Chain, s txbuilder.Submitter, assets *asset.Registry, accounts *account.Manager, assetID bc.AssetID, amount uint64, accountID string) (*bc.TxOutput, *bc.ResultInfo, bc.Hash) {
 	assetAmount := bc.AssetAmount{AssetID: assetID, Amount: amount}
 
 	tpl, err := txbuilder.Build(ctx, nil, []txbuilder.Action{
@@ -63,7 +69,7 @@ func IssueAssets(ctx context.Context, t testing.TB, c *protocol.Chain, s txbuild
 		testutil.FatalErr(t, err)
 	}
 
-	return tpl.Transaction.Outputs[0], tpl.Transaction.OutputID(0)
+	return tpl.Transaction.Outputs[0], &tpl.Transaction.Results[0], tpl.Transaction.OutputID(0)
 }
 
 func Transfer(ctx context.Context, t testing.TB, c *protocol.Chain, s txbuilder.Submitter, actions []txbuilder.Action) *bc.Tx {
